@@ -1,0 +1,454 @@
+from typing import Dict, List, Optional
+import re
+import logging
+from dataclasses import dataclass
+from textblob import TextBlob
+import nltk
+from nltk.tokenize import sent_tokenize
+import asyncio
+from openai import OpenAI
+import json
+
+# Download required NLTK data
+nltk.download('punkt', quiet=True)
+nltk.download('averaged_perceptron_tagger', quiet=True)
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class OptimizationResult:
+    original_content: str
+    optimized_content: str
+    improvements: List[str]
+    metrics: Dict[str, float]
+    seo_score: float
+    readability_score: float
+    engagement_score: float
+
+class ContentOptimizer:
+    def __init__(self, config: Dict):
+        self.config = config
+        self.client = OpenAI(api_key=config['services']['openai']['api_key'])
+        self.model = config['services']['openai'].get('optimization_model', 'gpt-4')
+    
+    async def optimize_content(self, content: str, keywords: List[str]) -> OptimizationResult:
+        """Optimize content for SEO, readability, and engagement"""
+        # Initial analysis
+        metrics = self._analyze_content(content)
+        
+        # Optimize different aspects in parallel
+        tasks = [
+            self._optimize_seo(content, keywords),
+            self._optimize_readability(content),
+            self._optimize_engagement(content)
+        ]
+        
+        seo_result, readability_result, engagement_result = await asyncio.gather(*tasks)
+        
+        # Combine optimizations intelligently
+        optimized_content = await self._merge_optimizations(
+            content,
+            seo_result,
+            readability_result,
+            engagement_result
+        )
+        
+        # Calculate final scores
+        final_metrics = self._analyze_content(optimized_content)
+        
+        return OptimizationResult(
+            original_content=content,
+            optimized_content=optimized_content,
+            improvements=self._get_improvements(metrics, final_metrics),
+            metrics=final_metrics,
+            seo_score=self._calculate_seo_score(final_metrics),
+            readability_score=self._calculate_readability_score(final_metrics),
+            engagement_score=self._calculate_engagement_score(final_metrics)
+        )
+    
+    def _analyze_content(self, content: str) -> Dict[str, float]:
+        """Analyze content metrics"""
+        blob = TextBlob(content)
+        sentences = sent_tokenize(content)
+        words = content.split()
+        
+        return {
+            'word_count': len(words),
+            'avg_sentence_length': len(words) / len(sentences),
+            'avg_word_length': sum(len(word) for word in words) / len(words),
+            'sentiment_polarity': blob.sentiment.polarity,
+            'sentiment_subjectivity': blob.sentiment.subjectivity,
+            'paragraph_count': len(content.split('\n\n')),
+            'heading_count': len(re.findall(r'^#+\s', content, re.MULTILINE))
+        }
+    
+    async def _optimize_seo(self, content: str, keywords: List[str]) -> str:
+        """Optimize content for SEO"""
+        prompt = f"""
+        Optimize this content for SEO while maintaining natural flow.
+        Target keywords: {', '.join(keywords)}
+
+        Requirements:
+        1. Ensure keywords appear in headings and first paragraph
+        2. Optimize meta description
+        3. Add relevant internal linking suggestions
+        4. Maintain keyword density 1-3%
+        5. Keep content natural and valuable
+
+        Content:
+        {content}
+
+        Return only the optimized content.
+        """
+
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": "You are an SEO expert."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content
+    
+    async def _optimize_readability(self, content: str) -> str:
+        """Optimize content for readability"""
+        prompt = f"""
+        Improve this content's readability while maintaining its message.
+
+        Focus on:
+        1. Clear, concise sentences
+        2. Logical paragraph breaks
+        3. Engaging subheadings
+        4. Bullet points for lists
+        5. Transition words
+        6. Active voice
+        7. Simplified vocabulary where appropriate
+
+        Content:
+        {content}
+
+        Return only the optimized content.
+        """
+
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": "You are a readability expert."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content
+    
+    async def _optimize_engagement(self, content: str) -> str:
+        """Optimize content for engagement"""
+        prompt = f"""
+        Enhance this content for maximum reader engagement.
+
+        Focus on:
+        1. Compelling introduction
+        2. Storytelling elements
+        3. Examples and analogies
+        4. Questions and calls-to-action
+        5. Emotional connection
+        6. Clear value proposition
+        7. Strong conclusion
+
+        Content:
+        {content}
+
+        Return only the optimized content.
+        """
+
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": "You are an engagement expert."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content
+    
+    async def _merge_optimizations(
+        self,
+        original: str,
+        seo: str,
+        readability: str,
+        engagement: str
+    ) -> str:
+        """Intelligently merge different optimizations"""
+        prompt = f"""
+        Merge these optimized versions into one cohesive piece.
+        Maintain the best elements of each while ensuring natural flow.
+
+        Original:
+        {original}
+
+        SEO Optimized:
+        {seo}
+
+        Readability Optimized:
+        {readability}
+
+        Engagement Optimized:
+        {engagement}
+
+        Return only the final merged content.
+        """
+
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": "You are a content optimization expert."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content
+    
+    def _get_improvements(self, original_metrics: Dict, final_metrics: Dict) -> List[str]:
+        """Generate list of improvements made"""
+        improvements = []
+        
+        metrics_descriptions = {
+            'word_count': ('Word count', 'words'),
+            'avg_sentence_length': ('Average sentence length', 'words'),
+            'avg_word_length': ('Average word length', 'characters'),
+            'sentiment_polarity': ('Content sentiment', 'positivity'),
+            'sentiment_subjectivity': ('Subjectivity', 'percentage'),
+            'paragraph_count': ('Number of paragraphs', 'paragraphs'),
+            'heading_count': ('Number of headings', 'headings')
+        }
+        
+        for metric, (desc, unit) in metrics_descriptions.items():
+            orig_val = original_metrics[metric]
+            final_val = final_metrics[metric]
+            
+            if metric in ['word_count', 'heading_count', 'paragraph_count']:
+                if final_val > orig_val:
+                    improvements.append(f"Increased {desc.lower()} from {orig_val} to {final_val} {unit}")
+            elif metric == 'avg_sentence_length':
+                if 10 <= final_val <= 20:  # Ideal range
+                    improvements.append(f"Optimized sentence length to {final_val:.1f} {unit}")
+            elif metric == 'sentiment_polarity':
+                if abs(final_val) > abs(orig_val):
+                    direction = "positive" if final_val > 0 else "negative"
+                    improvements.append(f"Enhanced {direction} sentiment")
+        
+        return improvements
+
+    def _calculate_seo_score(self, metrics: Dict) -> float:
+        """Calculate SEO score from metrics"""
+        weights = {
+            'word_count': 0.3,  # Longer content tends to rank better
+            'heading_count': 0.2,  # Good structure is important
+            'paragraph_count': 0.1,  # Content breaks improve readability
+        }
+        
+        score = 0
+        
+        # Word count score (optimal: 1500-2500 words)
+        word_count = metrics['word_count']
+        if 1500 <= word_count <= 2500:
+            score += weights['word_count']
+        else:
+            score += weights['word_count'] * (min(word_count, 2500) / 2500)
+        
+        # Heading count score (optimal: 1 heading per 300 words)
+        optimal_headings = word_count / 300
+        actual_headings = metrics['heading_count']
+        heading_score = min(actual_headings / optimal_headings, 1)
+        score += weights['heading_count'] * heading_score
+        
+        # Paragraph count score (optimal: 1 paragraph per 150 words)
+        optimal_paragraphs = word_count / 150
+        actual_paragraphs = metrics['paragraph_count']
+        paragraph_score = min(actual_paragraphs / optimal_paragraphs, 1)
+        score += weights['paragraph_count'] * paragraph_score
+        
+        return min(score, 1.0)
+
+    def _calculate_readability_score(self, metrics: Dict) -> float:
+        """Calculate readability score from metrics"""
+        weights = {
+            'avg_sentence_length': 0.4,
+            'avg_word_length': 0.3,
+            'paragraph_count': 0.3
+        }
+        
+        score = 0
+        
+        # Sentence length score (optimal: 15-20 words)
+        sent_length = metrics['avg_sentence_length']
+        if 15 <= sent_length <= 20:
+            score += weights['avg_sentence_length']
+        else:
+            score += weights['avg_sentence_length'] * (1 - abs(sent_length - 17.5) / 17.5)
+        
+        # Word length score (optimal: 4-6 characters)
+        word_length = metrics['avg_word_length']
+        if 4 <= word_length <= 6:
+            score += weights['avg_word_length']
+        else:
+            score += weights['avg_word_length'] * (1 - abs(word_length - 5) / 5)
+        
+        # Paragraph length score (optimal: short paragraphs)
+        words_per_para = metrics['word_count'] / max(metrics['paragraph_count'], 1)
+        if words_per_para <= 100:
+            score += weights['paragraph_count']
+        else:
+            score += weights['paragraph_count'] * (100 / words_per_para)
+        
+        return min(score, 1.0)
+
+    def _calculate_engagement_score(self, metrics: Dict) -> float:
+        """Calculate engagement score from metrics"""
+        weights = {
+            'sentiment_polarity': 0.3,
+            'sentiment_subjectivity': 0.3,
+            'structure_score': 0.4
+        }
+        
+        score = 0
+        
+        # Sentiment polarity score (optimal: slightly positive)
+        polarity = metrics['sentiment_polarity']
+        if 0.1 <= polarity <= 0.5:
+            score += weights['sentiment_polarity']
+        else:
+            score += weights['sentiment_polarity'] * (1 - abs(polarity - 0.3) / 0.3)
+        
+        # Subjectivity score (optimal: balanced)
+        subjectivity = metrics['sentiment_subjectivity']
+        if 0.3 <= subjectivity <= 0.7:
+            score += weights['sentiment_subjectivity']
+        else:
+            score += weights['sentiment_subjectivity'] * (1 - abs(subjectivity - 0.5) / 0.5)
+        
+        # Structure score (based on headings and paragraphs)
+        words_per_section = metrics['word_count'] / max(metrics['heading_count'], 1)
+        if 200 <= words_per_section <= 400:
+            score += weights['structure_score']
+        else:
+            score += weights['structure_score'] * (1 - abs(words_per_section - 300) / 300)
+        
+        return min(score, 1.0)
+
+class ContentEnhancer:
+    """Additional content enhancements beyond basic optimization"""
+    
+    def __init__(self, config: Dict):
+        self.config = config
+        self.client = OpenAI(api_key=config['services']['openai']['api_key'])
+    
+    async def enhance_content(self, content: str) -> Dict[str, str]:
+        """Apply various enhancements to content"""
+        enhancements = await asyncio.gather(
+            self._add_examples(content),
+            self._add_statistics(content),
+            self._add_expert_quotes(content),
+            self._create_social_snippets(content)
+        )
+        
+        return {
+            'with_examples': enhancements[0],
+            'with_statistics': enhancements[1],
+            'with_quotes': enhancements[2],
+            'social_snippets': enhancements[3]
+        }
+    
+    async def _add_examples(self, content: str) -> str:
+        """Add relevant examples to content"""
+        prompt = f"""
+        Enhance this content by adding relevant, real-world examples.
+        Keep examples practical and relatable.
+        Integrate naturally into the content.
+        Maximum 3 examples.
+
+        Content:
+        {content}
+        """
+
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a content enhancement expert."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content
+    
+    async def _add_statistics(self, content: str) -> str:
+        """Add relevant statistics and data points"""
+        prompt = f"""
+        Enhance this content by adding relevant statistics and data points.
+        Use recent, credible statistics.
+        Maximum 3 data points.
+        Include source references.
+
+        Content:
+        {content}
+        """
+
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a research expert."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content
+    
+    async def _add_expert_quotes(self, content: str) -> str:
+        """Add relevant expert quotes"""
+        prompt = f"""
+        Enhance this content by adding relevant expert quotes.
+        Use well-known experts in the field.
+        Maximum 2 quotes.
+        Include attribution.
+
+        Content:
+        {content}
+        """
+
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an expert researcher."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content
+    
+    async def _create_social_snippets(self, content: str) -> Dict[str, str]:
+        """Create social media snippets from content"""
+        prompt = f"""
+        Create social media posts from this content:
+        1. Twitter (280 chars)
+        2. LinkedIn (2-3 paragraphs)
+        3. Facebook (2-4 sentences)
+        4. Instagram (caption with hashtags)
+
+        Make each post engaging and platform-appropriate.
+        Include relevant hashtags.
+        Format as JSON with keys: twitter, linkedin, facebook, instagram
+
+        Content:
+        {content}
+        """
+
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a social media expert."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={ "type": "json_object" }
+        )
+        
+        return json.loads(response.choices[0].message.content)

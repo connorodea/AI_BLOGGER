@@ -1,0 +1,83 @@
+        prompt = f"""
+        Create social media posts for:
+        - Twitter (280 chars)
+        - LinkedIn (1-2 paragraphs)
+        - Facebook (2-3 sentences)
+        
+        Topic: {topic.title}
+        Keywords: {', '.join(topic.keywords)}
+        
+        Return as JSON with keys: twitter, linkedin, facebook
+        """
+        
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a social media expert."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={ "type": "json_object" }
+        )
+        
+        return json.loads(response.choices[0].message.content)
+
+    async def enhance_with_media(self, content: str) -> str:
+        """Add image suggestions and enhancements"""
+        sections = content.split('\n\n')
+        enhanced_sections = []
+        
+        for i, section in enumerate(sections):
+            enhanced_sections.append(section)
+            
+            # Add image suggestion every 3-4 sections
+            if i > 0 and i % 3 == 0:
+                image_prompt = f"Context: {section}\nDescribe an image that would enhance this section."
+                response = await self.client.chat.completions.create(
+                    model="gpt-4",
+                    messages=[
+                        {"role": "system", "content": "You are a visual content expert."},
+                        {"role": "user", "content": image_prompt}
+                    ]
+                )
+                image_desc = response.choices[0].message.content
+                enhanced_sections.append(f"\n[IMAGE: {image_desc}]\n")
+        
+        return '\n\n'.join(enhanced_sections)
+
+    async def add_internal_links(self, content: str, related_posts: List[Dict]) -> str:
+        """Add internal linking suggestions"""
+        # Find key phrases to link
+        prompt = f"""
+        Identify 3-5 key phrases in this content that could link to other posts.
+        Return only JSON array of phrases.
+        
+        Content:
+        {content}
+        """
+        
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an SEO expert."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={ "type": "json_object" }
+        )
+        
+        phrases = json.loads(response.choices[0].message.content)
+        
+        # Add link suggestions
+        enhanced_content = content
+        for phrase in phrases:
+            matching_posts = [
+                post for post in related_posts 
+                if any(kw.lower() in phrase.lower() for kw in post['keywords'])
+            ]
+            if matching_posts:
+                post = matching_posts[0]
+                enhanced_content = enhanced_content.replace(
+                    phrase,
+                    f"{phrase} [LINK: {post['title']}]"
+                )
+        
+        return enhanced_content

@@ -1,0 +1,230 @@
+from typing import Dict, List, Optional
+import logging
+import asyncio
+from datetime import datetime, timedelta
+from pathlib import Path
+import yaml
+
+from .integrations.storage.manager import StorageManager
+from .integrations.ai.generator import ContentPipeline, GenerationParams
+from .integrations.storage.gcloud import GCloudStorageBackend
+from .content_research import ContentResearchManager, ContentStrategy
+
+logger = logging.getLogger(__name__)
+
+class BlogOrchestrator:
+    """Main orchestrator for the AI Blog Engine"""
+    
+    def __init__(self, config_path: str):
+        self.config = self._load_config(config_path)
+        self.storage = StorageManager(self.config)
+        self.pipeline = ContentPipeline(self.config)
+        self.research = ContentResearchManager(self.config)
+        self.strategy = ContentStrategy(self.config)
+        
+        # Initialize monitoring
+        self._setup_monitoring()
+    
+    def _load_config(self, config_path: str) -> Dict:
+        """Load and validate configuration"""
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+            
+        # Validate required configuration
+        required_services = ['openai', 'storage']
+        for service in required_services:
+            if service not in config.get('services', {}):
+                raise ValueError(f"Missing required service configuration: {service}")
+        
+        return config
+    
+    def _setup_monitoring(self):
+        """Setup monitoring and logging"""
+        log_config = self.config.get('logging', {})
+        logging.basicConfig(
+            level=log_config.get('level', 'INFO'),
+            format=log_config.get('format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        )
+    
+    async def initialize(self):
+        """Initialize all components"""
+        try:
+            # Initialize storage
+            await self.storage.initialize()
+            logger.info("Storage initialized successfully")
+            
+            # Test AI service connection
+            await self.pipeline.test_connection()
+            logger.info("AI service connection verified")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Initialization failed: {e}")
+            raise
+    
+    async def create_blog_post(
+        self,
+        topic: str,
+        keywords: List[str],
+        params: Optional[GenerationParams] = None
+    ) -> Dict:
+        """Create a complete blog post"""
+        try:
+            # Research and plan
+            research_topic = await self.research.research_topic(topic, keywords)
+            content_plan = await self.research.create_content_plan(research_topic)
+            
+            # Generate content
+            generation_params = params or GenerationParams()
+            content_result = await self.pipeline.generate_content(
+                research_topic,
+                content_plan,
+                generation_params
+            )
+            
+            # Prepare post data
+            post_data = {
+                'title': research_topic.title,
+                'content': content_result['content'],
+                'keywords': keywords,
+                'meta_description': content_result['meta_description'],
+                'social_snippets': content_result['social_snippets'],
+                'created_at': datetime.now(),
+                'status': 'draft',
+                'metadata': {
+                    'quality_scores': content_result['quality_scores'],
+                    'generation_params': content_result['generation_params'],
+                    'research_data': research_topic.__dict__,
+                    'content_plan': content_plan.__dict__
+                }
+            }
+            
+            # Save post
+            storage_result = await self.storage.save_post(post_data)
+            
+            # Return combined results
+            return {
+                **post_data,
+                'storage_path': storage_result['file_path'],
+                'public_url': storage_result.get('public_url')
+            }
+            
+        except Exception as e:
+            logger.error(f"Blog post creation failed: {e}")
+            raise
+    
+    async def plan_content_calendar(
+        self,
+        niche: str,
+        posts_per_week: int = 2,
+        weeks: int = 4
+    ) -> List[Dict]:
+        """Plan content calendar"""
+        try:
+            planned_content = await self.strategy.plan_content_calendar(
+                niche,
+                posts_per_week=posts_per_week
+            )
+            
+            # Save content plan
+            plan_data = {
+                'niche': niche,
+                'posts_per_week': posts_per_week,
+                'weeks': weeks,
+                'planned_content': planned_content,
+                'created_at': datetime.now().isoformat()
+            }
+            
+            await self.storage.save_file(
+                yaml.dump(plan_data),
+                f"plans/content_calendar_{datetime.now().strftime('%Y%m')}.yaml"
+            )
+            
+            return planned_content
+            
+        except Exception as e:
+            logger.error(f"Content calendar planning failed: {e}")
+            raise
+    
+    async def generate_planned_content(self, plan_id: str) -> List[Dict]:
+        """Generate content for a planned calendar"""
+        try:
+            # Load content plan
+            plan_content = await self.storage.read_file(f"plans/{plan_id}.yaml")
+            plan_data = yaml.safe_load(plan_content)
+            
+            generated_posts = []
+            for content in plan_data['planned_content']:
+                post = await self.create_blog_post(
+                    topic=content['plan'].topic.title,
+                    keywords=content['plan'].topic.keywords,
+                    params=GenerationParams(
+                        style="professional",
+                        tone="informative",
+                        word_count=content['plan'].target_word_count
+                    )
+                )
+                generated_posts.append(post)
+                
+                # Space out generation to avoid rate limits
+                await asyncio.sleep(30)
+            
+            return generated_posts
+            
+        except Exception as e:
+            logger.error(f"Planned content generation failed: {e}")
+            raise
+    
+    async def publish_post(self, post_id: str) -> Dict:
+        """Publish a blog post"""
+        try:
+            # Get post
+            post = await self.storage.get_post(post_id)
+            if not post:
+                raise ValueError(f"Post not found: {post_id}")
+            
+            # Update status
+            post['status'] = 'published'
+            post['published_at'] = datetime.now().isoformat()
+            
+            # Save updated post
+            result = await self.storage.save_post(post)
+            
+            # Generate social media posts
+            social_posts = post.get('social_snippets', {})
+            
+            return {
+                'post': post,
+                'storage_result': result,
+                'social_posts': social_posts
+            }
+            
+        except Exception as e:
+            logger.error(f"Post publication failed: {e}")
+            raise
+    
+    async def get_blog_stats(self) -> Dict:
+        """Get blog statistics"""
+        try:
+            posts = await self.storage.list_posts()
+            
+            # Calculate basic stats
+            total_posts = len(posts)
+            published_posts = len([p for p in posts if p.get('status') == 'published'])
+            avg_quality = sum(
+                sum(p['metadata']['quality_scores'].values()) / 
+                len(p['metadata']['quality_scores'])
+                for p in posts
+            ) / total_posts if total_posts > 0 else 0
+            
+            return {
+                'total_posts': total_posts,
+                'published_posts': published_posts,
+                'draft_posts': total_posts - published_posts,
+                'average_quality_score': avg_quality,
+                'latest_post': max(posts, key=lambda x: x['created_at']) if posts else None
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get blog stats: {e}")
+            raise

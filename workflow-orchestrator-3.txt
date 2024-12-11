@@ -1,0 +1,149 @@
+from typing import Dict, List, Optional
+import asyncio
+from datetime import datetime
+import logging
+from dataclasses import dataclass
+import json
+
+from .storage import StorageManager
+from .optimizer import ContentOptimizer, ContentEnhancer
+from .monitoring import MonitoringSystem
+from .research import ContentResearchManager
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class WorkflowConfig:
+    research_enabled: bool = True
+    optimization_enabled: bool = True
+    enhancement_enabled: bool = True
+    monitoring_enabled: bool = True
+    auto_publish: bool = False
+    review_required: bool = True
+    max_retries: int = 3
+    concurrent_generations: int = 3
+
+class WorkflowOrchestrator:
+    """Orchestrates the entire content generation workflow"""
+    
+    def __init__(self, config: Dict):
+        self.config = config
+        self.workflow_config = WorkflowConfig(**config.get('workflow', {}))
+        
+        # Initialize components
+        self.storage = StorageManager(config)
+        self.optimizer = ContentOptimizer(config)
+        self.enhancer = ContentEnhancer(config)
+        self.research = ContentResearchManager(config)
+        
+        if self.workflow_config.monitoring_enabled:
+            self.monitoring = MonitoringSystem(config)
+        
+        # Track active tasks
+        self._active_tasks: Dict[str, asyncio.Task] = {}
+        
+        # Initialize semaphore for concurrent tasks
+        self._semaphore = asyncio.Semaphore(self.workflow_config.concurrent_generations)
+    
+    async def initialize(self):
+        """Initialize all components"""
+        try:
+            await self.storage.initialize()
+            
+            if self.workflow_config.monitoring_enabled:
+                await self.monitoring.start_monitoring()
+            
+            logger.info("Workflow orchestrator initialized successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize workflow orchestrator: {e}")
+            raise
+    
+    async def generate_content(
+        self,
+        topic: str,
+        keywords: List[str],
+        params: Optional[Dict] = None
+    ) -> Dict:
+        """Generate complete blog post with all optimizations"""
+        async with self._semaphore:
+            task_id = f"task_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            
+            try:
+                # Start monitoring if enabled
+                if self.workflow_config.monitoring_enabled:
+                    self.monitoring.monitor.track_generation(asyncio.current_task())
+                
+                # Research phase
+                if self.workflow_config.research_enabled:
+                    research = await self.research.research_topic(topic, keywords)
+                else:
+                    research = None
+                
+                # Generate base content
+                content = await self._generate_base_content(topic, keywords, research)
+                
+                # Optimize content
+                if self.workflow_config.optimization_enabled:
+                    optimization_result = await self.optimizer.optimize_content(
+                        content,
+                        keywords
+                    )
+                    content = optimization_result.optimized_content
+                    metrics = optimization_result.metrics
+                else:
+                    optimization_result = None
+                    metrics = {}
+                
+                # Enhance content
+                if self.workflow_config.enhancement_enabled:
+                    enhancements = await self.enhancer.enhance_content(content)
+                else:
+                    enhancements = {}
+                
+                # Prepare final content
+                post_data = {
+                    'topic': topic,
+                    'keywords': keywords,
+                    'content': content,
+                    'research': research.__dict__ if research else None,
+                    'metrics': metrics,
+                    'enhancements': enhancements,
+                    'parameters': params or {},
+                    'created_at': datetime.now().isoformat(),
+                    'task_id': task_id,
+                    'status': 'draft'
+                }
+                
+                # Save content
+                storage_result = await self.storage.save_post(post_data)
+                
+                # Auto-publish if enabled and no review required
+                if (self.workflow_config.auto_publish and 
+                    not self.workflow_config.review_required):
+                    await self.publish_content(task_id)
+                
+                return {
+                    **post_data,
+                    'storage_path': storage_result['file_path'],
+                    'public_url': storage_result.get('public_url')
+                }
+                
+            except Exception as e:
+                logger.error(f"Content generation failed for task {task_id}: {e}")
+                if self.workflow_config.monitoring_enabled:
+                    self.monitoring.monitor.metrics.error_count.labels(
+                        type=type(e).__name__
+                    ).inc()
+                raise
+    
+    async def publish_content(self, task_id: str) -> Dict:
+        """Publish generated content"""
+        try:
+            # Get content
+            content = await self.storage.get_post(task_id)
+            if not content:
+                raise ValueError(f"Content not found for task {task_id}")
+            
+            # Update status
+            content['status'] = 'published'

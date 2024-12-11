@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+# cli.py
+
+import click
+import asyncio
+import yaml
+from pathlib import Path
+import sys
+from datetime import datetime
+from rich.console import Console
+from rich.table import Table
+from rich.progress import Progress
+
+from blog_engine.orchestrator import BlogOrchestrator
+from blog_engine.integrations.ai.generator import GenerationParams
+
+console = Console()
+
+def load_config(ctx, param, value):
+    try:
+        with open(value) as f:
+            return yaml.safe_load(f)
+    except Exception as e:
+        raise click.BadParameter(f"Could not load config file: {e}")
+
+@click.group()
+@click.option(
+    '--config',
+    type=click.Path(exists=True),
+    default='config.yaml',
+    callback=load_config,
+    help='Path to config file'
+)
+@click.pass_context
+def cli(ctx, config):
+    """AI Blog Engine CLI"""
+    ctx.ensure_object(dict)
+    ctx.obj['config'] = config
+
+@cli.command()
+@click.pass_context
+def init(ctx):
+    """Initialize the blog engine"""
+    async def run():
+        orchestrator = BlogOrchestrator(ctx.obj['config'])
+        with console.status("[bold green]Initializing blog engine..."):
+            await orchestrator.initialize()
+        console.print("[bold green]✓[/] Blog engine initialized successfully!")
+    
+    asyncio.run(run())
+
+@cli.command()
+@click.option('--topic', required=True, help='Blog post topic')
+@click.option('--keywords', required=True, help='Comma-separated keywords')
+@click.option('--style', default='professional', help='Writing style')
+@click.option('--tone', default='informative', help='Content tone')
+@click.option('--words', default=1500, help='Target word count')
+@click.pass_context
+def create(ctx, topic, keywords, style, tone, words):
+    """Create a new blog post"""
+    async def run():
+        orchestrator = BlogOrchestrator(ctx.obj['config'])
+        
+        params = GenerationParams(
+            style=style,
+            tone=tone,
+            word_count=words
+        )
+        
+        with Progress() as progress:
+            task = progress.add_task("[cyan]Creating blog post...", total=100)
+            
+            # Update progress as steps complete
+            progress.update(task, advance=20)
+            
+            result = await orchestrator.create_blog_post(
+                topic=topic,
+                keywords=keywords.split(','),
+                params=params
+            )
+            
+            progress.update(task, advance=80)
+        
+        # Display result
+        table = Table(title="Blog Post Created")
+        table.add_column("Property", style="cyan")
+        table.add_column("Value")
+        
+        table.add_row("Title", result['title'])
+        table.add_row("Keywords", ", ".join(result['keywords']))
+        table.add_row("Quality Score", f"{result['metadata']['quality_scores']['readability']:.2f}")
+        table.add_row("Storage Path", result['storage_path'])
+        if result.get('public_url'):
+            table.add_row("Public URL", result['public_url'])
+        
+        console.print(table)
+    
+    asyncio.

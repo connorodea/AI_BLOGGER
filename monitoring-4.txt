@@ -1,0 +1,199 @@
+from typing import Dict, Optional, List
+import logging
+import time
+from dataclasses import dataclass
+from datetime import datetime
+import prometheus_client
+from prometheus_client import Counter, Histogram, Gauge
+import psutil
+import asyncio
+
+@dataclass
+class MonitoringMetrics:
+    posts_generated = Counter('blog_posts_generated_total', 'Total blog posts generated')
+    generation_time = Histogram('blog_post_generation_seconds', 'Time spent generating posts')
+    storage_operations = Counter('storage_operations_total', 'Storage operations', ['operation'])
+    api_calls = Counter('api_calls_total', 'API calls made', ['service'])
+    error_count = Counter('errors_total', 'Total errors', ['type'])
+    active_generations = Gauge('active_generations', 'Current active generations')
+    system_memory = Gauge('system_memory_usage_bytes', 'System memory usage')
+    token_usage = Counter('token_usage_total', 'Token usage by model', ['model'])
+
+class PerformanceMonitor:
+    def __init__(self):
+        self.metrics = MonitoringMetrics()
+        self.start_http_server()
+    
+    def start_http_server(self, port: int = 8000):
+        """Start Prometheus metrics HTTP server"""
+        prometheus_client.start_http_server(port)
+    
+    async def monitor_system_resources(self):
+        """Monitor system resources periodically"""
+        while True:
+            self.metrics.system_memory.set(psutil.Process().memory_info().rss)
+            await asyncio.sleep(15)
+    
+    def track_generation(self, func):
+        """Decorator to track content generation"""
+        async def wrapper(*args, **kwargs):
+            self.metrics.active_generations.inc()
+            start_time = time.time()
+            
+            try:
+                result = await func(*args, **kwargs)
+                self.metrics.posts_generated.inc()
+                return result
+            except Exception as e:
+                self.metrics.error_count.labels(type=type(e).__name__).inc()
+                raise
+            finally:
+                self.metrics.generation_time.observe(time.time() - start_time)
+                self.metrics.active_generations.dec()
+        
+        return wrapper
+
+    def track_storage(self, func):
+        """Decorator to track storage operations"""
+        async def wrapper(*args, **kwargs):
+            operation = func.__name__
+            start_time = time.time()
+            
+            try:
+                result = await func(*args, **kwargs)
+                self.metrics.storage_operations.labels(operation=operation).inc()
+                return result
+            except Exception as e:
+                self.metrics.error_count.labels(type=type(e).__name__).inc()
+                raise
+            
+        return wrapper
+
+    def track_api_call(self, func):
+        """Decorator to track API calls"""
+        async def wrapper(*args, **kwargs):
+            service = kwargs.get('service', 'unknown')
+            
+            try:
+                result = await func(*args, **kwargs)
+                self.metrics.api_calls.labels(service=service).inc()
+                return result
+            except Exception as e:
+                self.metrics.error_count.labels(type=type(e).__name__).inc()
+                raise
+            
+        return wrapper
+
+class AlertManager:
+    def __init__(self, config: Dict):
+        self.config = config
+        self.alert_thresholds = config.get('monitoring', {}).get('alerts', {})
+    
+    async def check_alerts(self, metrics: MonitoringMetrics):
+        """Check metrics against alert thresholds"""
+        alerts = []
+        
+        # Check error rate
+        error_rate = metrics.error_count._value.sum()
+        if error_rate > self.alert_thresholds.get('error_rate', 0.1):
+            alerts.append({
+                'severity': 'high',
+                'message': f'High error rate detected: {error_rate}',
+                'timestamp': datetime.now().isoformat()
+            })
+        
+        # Check system resources
+        memory_usage = psutil.Process().memory_info().rss / (1024 * 1024)  # MB
+        if memory_usage > self.alert_thresholds.get('memory_mb', 1000):
+            alerts.append({
+                'severity': 'medium',
+                'message': f'High memory usage: {memory_usage}MB',
+                'timestamp': datetime.now().isoformat()
+            })
+        
+        return alerts
+
+class AnalyticsCollector:
+    def __init__(self, config: Dict):
+        self.config = config
+    
+    async def collect_metrics(self) -> Dict:
+        """Collect all relevant metrics"""
+        return {
+            'posts_generated': prometheus_client.REGISTRY.get_sample_value('blog_posts_generated_total'),
+            'avg_generation_time': prometheus_client.REGISTRY.get_sample_value('blog_post_generation_seconds_sum') / 
+                                 prometheus_client.REGISTRY.get_sample_value('blog_post_generation_seconds_count'),
+            'error_rate': prometheus_client.REGISTRY.get_sample_value('errors_total'),
+            'active_generations': prometheus_client.REGISTRY.get_sample_value('active_generations'),
+            'system_memory': prometheus_client.REGISTRY.get_sample_value('system_memory_usage_bytes'),
+            'token_usage': {
+                model: prometheus_client.REGISTRY.get_sample_value(f'token_usage_total', {'model': model})
+                for model in ['gpt-4', 'gpt-3.5-turbo']
+            }
+        }
+    
+    async def generate_report(self, period: str = 'daily') -> Dict:
+        """Generate analytics report"""
+        metrics = await self.collect_metrics()
+        
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'period': period,
+            'metrics': metrics,
+            'insights': await self._generate_insights(metrics)
+        }
+    
+    async def _generate_insights(self, metrics: Dict) -> List[str]:
+        """Generate insights from metrics"""
+        insights = []
+        
+        # Analyze generation efficiency
+        avg_time = metrics.get('avg_generation_time', 0)
+        if avg_time > 60:  # If average generation takes more than 60 seconds
+            insights.append(f"Long average generation time ({avg_time:.1f}s). Consider optimization.")
+        
+        # Analyze error rates
+        error_rate = metrics.get('error_rate', 0)
+        if error_rate > 0.1:
+            insights.append(f"High error rate detected ({error_rate:.2%}). Review error logs.")
+        
+        # Analyze token usage
+        token_usage = metrics.get('token_usage', {})
+        if token_usage.get('gpt-4', 0) > 1000000:
+            insights.append("High GPT-4 token usage. Consider caching or using GPT-3.5 for drafts.")
+        
+        return insights
+
+class MonitoringSystem:
+    def __init__(self, config: Dict):
+        self.config = config
+        self.monitor = PerformanceMonitor()
+        self.alerts = AlertManager(config)
+        self.analytics = AnalyticsCollector(config)
+    
+    async def start_monitoring(self):
+        """Start all monitoring systems"""
+        # Start system resource monitoring
+        asyncio.create_task(self.monitor.monitor_system_resources())
+        
+        # Start alert checking
+        asyncio.create_task(self._check_alerts_periodic())
+        
+        # Start analytics collection
+        asyncio.create_task(self._collect_analytics_periodic())
+    
+    async def _check_alerts_periodic(self):
+        """Periodically check for alerts"""
+        while True:
+            alerts = await self.alerts.check_alerts(self.monitor.metrics)
+            if alerts:
+                # Handle alerts (e.g., send notifications)
+                pass
+            await asyncio.sleep(60)  # Check every minute
+    
+    async def _collect_analytics_periodic(self):
+        """Periodically collect analytics"""
+        while True:
+            report = await self.analytics.generate_report()
+            # Store or process analytics report
+            await asyncio.sleep(3600)  # Collect hourly

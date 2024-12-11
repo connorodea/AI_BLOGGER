@@ -1,0 +1,204 @@
+from typing import Dict, List, Optional, Union
+import logging
+import json
+from pathlib import Path
+import asyncio
+from datetime import datetime
+from dataclasses import dataclass
+from openai import OpenAI
+import yaml
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class GenerationParams:
+    """Parameters for content generation"""
+    style: str = "professional"
+    tone: str = "informative"
+    word_count: int = 1500
+    sections: List[str] = None
+    key_points: List[str] = None
+    target_audience: str = "general"
+    seo_focus: bool = True
+    include_images: bool = True
+    include_links: bool = True
+
+class ContentQuality:
+    """Content quality checker and improver"""
+    
+    def __init__(self, client: OpenAI):
+        self.client = client
+    
+    async def check_quality(self, content: str, criteria: List[str]) -> Dict[str, float]:
+        """Check content quality against criteria"""
+        prompt = f"""
+        Analyze this content against the following criteria.
+        Rate each criterion from 0-1.
+        Return only JSON with scores.
+        
+        Criteria: {', '.join(criteria)}
+        
+        Content:
+        {content[:1000]}... (truncated)
+        """
+        
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a content quality expert."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={ "type": "json_object" }
+        )
+        
+        return json.loads(response.choices[0].message.content)
+    
+    async def improve_content(self, content: str, issues: List[str]) -> str:
+        """Improve content based on identified issues"""
+        prompt = f"""
+        Improve this content focusing on these issues:
+        {', '.join(issues)}
+        
+        Keep the same overall structure and key points.
+        Return the improved content in markdown format.
+        
+        Content:
+        {content}
+        """
+        
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a content improvement expert."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content
+
+class ContentPipeline:
+    """Enhanced content generation pipeline"""
+    
+    def __init__(self, config: Dict):
+        self.config = config
+        self.client = OpenAI(api_key=config['services']['openai']['api_key'])
+        self.quality_checker = ContentQuality(self.client)
+    
+    async def generate_content(
+        self,
+        topic: ResearchTopic,
+        plan: ContentPlan,
+        params: GenerationParams
+    ) -> Dict[str, Union[str, Dict]]:
+        """Generate content using the improved pipeline"""
+        try:
+            # 1. Generate initial draft
+            initial_draft = await self._generate_draft(topic, plan, params)
+            
+            # 2. Check quality
+            quality_scores = await self.quality_checker.check_quality(
+                initial_draft,
+                ['readability', 'engagement', 'seo', 'accuracy', 'coherence']
+            )
+            
+            # 3. Improve content if needed
+            content = initial_draft
+            if any(score < 0.8 for score in quality_scores.values()):
+                issues = [k for k, v in quality_scores.items() if v < 0.8]
+                content = await self.quality_checker.improve_content(content, issues)
+                
+                # Recheck quality
+                quality_scores = await self.quality_checker.check_quality(
+                    content,
+                    ['readability', 'engagement', 'seo', 'accuracy', 'coherence']
+                )
+            
+            # 4. Generate additional content elements
+            meta_description = await self._generate_meta_description(topic, content)
+            social_snippets = await self._generate_social_snippets(topic, content)
+            
+            return {
+                'content': content,
+                'meta_description': meta_description,
+                'social_snippets': social_snippets,
+                'quality_scores': quality_scores,
+                'generation_params': params.__dict__,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Content generation pipeline failed: {e}")
+            raise
+    
+    async def _generate_draft(
+        self,
+        topic: ResearchTopic,
+        plan: ContentPlan,
+        params: GenerationParams
+    ) -> str:
+        """Generate initial content draft"""
+        prompt = f"""
+        Write a {params.style} blog post about: {topic.title}
+        
+        Use this outline:
+        {yaml.dump(plan.outline)}
+        
+        Key points to cover:
+        {yaml.dump(plan.key_points)}
+        
+        Requirements:
+        - Writing style: {params.style}
+        - Tone: {params.tone}
+        - Target word count: {params.word_count}
+        - Target audience: {params.target_audience}
+        - Keywords to include: {', '.join(topic.keywords)}
+        
+        Format in markdown.
+        Include appropriate internal link suggestions with [LINK] placeholders.
+        If including images, use [IMAGE] placeholders with descriptions.
+        """
+        
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a professional blog writer."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content
+    
+    async def _generate_meta_description(self, topic: ResearchTopic, content: str) -> str:
+        """Generate SEO meta description"""
+        prompt = f"""
+        Write an engaging meta description for this blog post.
+        Include main keyword: {topic.keywords[0]}
+        Max 155 characters.
+        Make it compelling for search results.
+        
+        Content first paragraph:
+        {content.split('\n\n')[0]}
+        """
+        
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an SEO expert."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content
+    
+    async def _generate_social_snippets(self, topic: ResearchTopic, content: str) -> Dict[str, str]:
+        """Generate social media snippets"""
+        prompt = f"""
+        Create social media posts for:
+        - Twitter (280 chars)
+        - LinkedIn (1-2 paragraphs)
+        - Facebook (2-3 sentences)
+        
+        Topic: {topic.title}
+        Keywords: {', '.join(topic.keywords)}
+        
+        Return as JSON with keys: twitter, linkedin, facebook
