@@ -1,0 +1,209 @@
+from typing import Dict, List, Optional, Callable
+import time
+import logging
+import asyncio
+from dataclasses import dataclass
+import psutil
+import numpy as np
+from collections import deque
+from functools import wraps
+import json
+from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class PerformanceMetric:
+    name: str
+    value: float
+    timestamp: float
+    metadata: Dict
+
+class PerformanceTracker:
+    """Performance tracking and optimization system"""
+    
+    def __init__(self, config: Dict):
+        self.config = config
+        self.window_size = config.get('performance', {}).get('window_size', 100)
+        
+        # Initialize metrics storage
+        self._metrics: Dict[str, deque] = {}
+        self._thresholds = config.get('performance', {}).get('thresholds', {})
+        
+        # Track resource usage
+        self._resource_usage = deque(maxlen=self.window_size)
+        
+        # Performance status
+        self._status = {
+            'healthy': True,
+            'warnings': [],
+            'last_check': None
+        }
+    
+    def track(self, name: str, threshold: Optional[float] = None):
+        """Decorator to track function performance"""
+        def decorator(func):
+            @wraps(func)
+            async def wrapper(*args, **kwargs):
+                start_time = time.time()
+                
+                try:
+                    result = await func(*args, **kwargs)
+                    execution_time = time.time() - start_time
+                    
+                    # Record metric
+                    self.record_metric(
+                        name=name,
+                        value=execution_time,
+                        metadata={
+                            'success': True,
+                            'args_length': len(args),
+                            'kwargs': list(kwargs.keys())
+                        }
+                    )
+                    
+                    return result
+                    
+                except Exception as e:
+                    execution_time = time.time() - start_time
+                    
+                    # Record failure metric
+                    self.record_metric(
+                        name=name,
+                        value=execution_time,
+                        metadata={
+                            'success': False,
+                            'error': str(e),
+                            'args_length': len(args),
+                            'kwargs': list(kwargs.keys())
+                        }
+                    )
+                    
+                    raise
+                    
+            return wrapper
+        return decorator
+    
+    def record_metric(self, name: str, value: float, metadata: Optional[Dict] = None):
+        """Record a performance metric"""
+        if name not in self._metrics:
+            self._metrics[name] = deque(maxlen=self.window_size)
+        
+        metric = PerformanceMetric(
+            name=name,
+            value=value,
+            timestamp=time.time(),
+            metadata=metadata or {}
+        )
+        
+        self._metrics[name].append(metric)
+        
+        # Check threshold if set
+        threshold = self._thresholds.get(name)
+        if threshold and value > threshold:
+            logger.warning(f"Performance threshold exceeded for {name}: {value} > {threshold}")
+            self._status['warnings'].append({
+                'metric': name,
+                'value': value,
+                'threshold': threshold,
+                'timestamp': datetime.now().isoformat()
+            })
+    
+    async def start_monitoring(self):
+        """Start performance monitoring"""
+        asyncio.create_task(self._monitor_resources())
+        asyncio.create_task(self._cleanup_old_warnings())
+    
+    async def _monitor_resources(self):
+        """Monitor system resources"""
+        while True:
+            try:
+                cpu_percent = psutil.cpu_percent()
+                memory_percent = psutil.virtual_memory().percent
+                
+                self._resource_usage.append({
+                    'timestamp': time.time(),
+                    'cpu_percent': cpu_percent,
+                    'memory_percent': memory_percent
+                })
+                
+                # Update status
+                self._status['healthy'] = (
+                    cpu_percent < self._thresholds.get('cpu_percent', 90) and
+                    memory_percent < self._thresholds.get('memory_percent', 90)
+                )
+                
+                self._status['last_check'] = datetime.now().isoformat()
+                
+                await asyncio.sleep(5)  # Check every 5 seconds
+                
+            except Exception as e:
+                logger.error(f"Resource monitoring error: {e}")
+                await asyncio.sleep(10)  # Wait longer on error
+    
+    async def _cleanup_old_warnings(self):
+        """Clean up old warning messages"""
+        while True:
+            try:
+                current_time = datetime.now()
+                # Keep warnings for 1 hour
+                self._status['warnings'] = [
+                    w for w in self._status['warnings']
+                    if datetime.fromisoformat(w['timestamp']) > current_time - timedelta(hours=1)
+                ]
+                await asyncio.sleep(300)  # Clean every 5 minutes
+                
+            except Exception as e:
+                logger.error(f"Warning cleanup error: {e}")
+                await asyncio.sleep(60)
+    
+    def get_metrics(self, name: Optional[str] = None) -> Dict:
+        """Get performance metrics"""
+        if name:
+            if name not in self._metrics:
+                return {}
+                
+            metrics = self._metrics[name]
+            values = [m.value for m in metrics]
+            
+            return {
+                'count': len(values),
+                'avg': np.mean(values),
+                'min': np.min(values),
+                'max': np.max(values),
+                'p95': np.percentile(values, 95),
+                'success_rate': sum(1 for m in metrics if m.metadata.get('success', True)) / len(metrics)
+            }
+        
+        return {
+            name: self.get_metrics(name)
+            for name in self._metrics
+        }
+    
+    def get_resource_usage(self) -> Dict:
+        """Get resource usage statistics"""
+        if not self._resource_usage:
+            return {}
+        
+        cpu_values = [r['cpu_percent'] for r in self._resource_usage]
+        memory_values = [r['memory_percent'] for r in self._resource_usage]
+        
+        return {
+            'cpu': {
+                'current': cpu_values[-1],
+                'avg': np.mean(cpu_values),
+                'max': np.max(cpu_values)
+            },
+            'memory': {
+                'current': memory_values[-1],
+                'avg': np.mean(memory_values),
+                'max': np.max(memory_values)
+            }
+        }
+    
+    def get_status(self) -> Dict:
+        """Get current performance status"""
+        return {
+            **self._status,
+            'metrics': self.get_metrics(),
+            'resources': self.get_resource_usage()

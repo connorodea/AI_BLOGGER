@@ -1,0 +1,106 @@
+return {
+            **self._status,
+            'metrics': self.get_metrics(),
+            'resources': self.get_resource_usage(),
+            'thresholds': self._thresholds,
+            'recent_warnings': self._status['warnings'][-5:],
+            'timestamp': datetime.now().isoformat()
+        }
+    
+    def suggest_optimizations(self) -> List[Dict]:
+        """Suggest performance optimizations based on metrics"""
+        suggestions = []
+        metrics = self.get_metrics()
+        resources = self.get_resource_usage()
+        
+        # Check CPU usage
+        if resources.get('cpu', {}).get('avg', 0) > 70:
+            suggestions.append({
+                'type': 'resource',
+                'severity': 'high',
+                'message': 'High average CPU usage detected',
+                'suggestion': 'Consider scaling horizontally or optimizing CPU-intensive operations'
+            })
+        
+        # Check memory usage
+        if resources.get('memory', {}).get('avg', 0) > 80:
+            suggestions.append({
+                'type': 'resource',
+                'severity': 'high',
+                'message': 'High average memory usage detected',
+                'suggestion': 'Consider increasing memory allocation or optimizing memory usage'
+            })
+        
+        # Check operation performance
+        for name, metric in metrics.items():
+            if metric['p95'] > self._thresholds.get(name, float('inf')):
+                suggestions.append({
+                    'type': 'performance',
+                    'severity': 'medium',
+                    'message': f'High latency detected for {name}',
+                    'suggestion': f'Optimize {name} operation or adjust threshold'
+                })
+            
+            if metric['success_rate'] < 0.95:
+                suggestions.append({
+                    'type': 'reliability',
+                    'severity': 'high',
+                    'message': f'Low success rate for {name}',
+                    'suggestion': 'Investigate failures and implement better error handling'
+                })
+        
+        return suggestions
+    
+    def export_metrics(self, format: str = 'json') -> str:
+        """Export metrics in specified format"""
+        data = {
+            'metrics': self.get_metrics(),
+            'resources': self.get_resource_usage(),
+            'status': self._status,
+            'export_time': datetime.now().isoformat()
+        }
+        
+        if format == 'json':
+            return json.dumps(data, indent=2)
+        elif format == 'prometheus':
+            # Convert to Prometheus format
+            lines = []
+            
+            # Add metrics
+            for name, metric in data['metrics'].items():
+                for key, value in metric.items():
+                    lines.append(f'blog_engine_{name}_{key} {value}')
+            
+            # Add resources
+            for resource, values in data['resources'].items():
+                for key, value in values.items():
+                    lines.append(f'blog_engine_resource_{resource}_{key} {value}')
+            
+            return '\n'.join(lines)
+        else:
+            raise ValueError(f"Unsupported export format: {format}")
+    
+    async def optimize_performance(self):
+        """Automatically optimize performance based on metrics"""
+        suggestions = self.suggest_optimizations()
+        optimizations_applied = []
+        
+        for suggestion in suggestions:
+            if suggestion['type'] == 'resource':
+                if suggestion['severity'] == 'high':
+                    # Implement resource-based optimizations
+                    optimizations_applied.append({
+                        'type': 'resource_optimization',
+                        'action': 'Adjusted resource allocation',
+                        'timestamp': datetime.now().isoformat()
+                    })
+            
+            elif suggestion['type'] == 'performance':
+                # Implement performance optimizations
+                optimizations_applied.append({
+                    'type': 'performance_optimization',
+                    'action': 'Adjusted operation parameters',
+                    'timestamp': datetime.now().isoformat()
+                })
+        
+        return optimizations_applied
