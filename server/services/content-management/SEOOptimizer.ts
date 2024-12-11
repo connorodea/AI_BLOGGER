@@ -59,12 +59,10 @@ export class SEOOptimizer {
       try {
         return await operation();
       } catch (error) {
-        console.error(`SEO optimization attempt ${attempt} failed:`, error);
-        
+        console.error(`Attempt ${attempt} failed:`, error);
         if (attempt === this.retryConfig.maxAttempts) {
           throw error;
         }
-        
         delay = Math.min(delay * 2, this.retryConfig.maxDelay);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
@@ -178,7 +176,7 @@ export class SEOOptimizer {
   }
 
   private async improveContent(
-    content: string,
+    content: string, 
     keywords: string[],
     analysis: SEOAnalysis
   ): Promise<string> {
