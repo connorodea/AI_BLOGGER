@@ -3,10 +3,13 @@ import { createServer, type Server } from "http";
 import { db } from "@db/index";
 import { posts, analytics, distributions } from "@db/schema";
 import { desc, eq, sql, and } from "drizzle-orm";
-import { generateContent, analyzeTopics, optimizeForSEO } from "./services/openai";
+import contentRoutes from "./routes/content";
+import { analyzeTopics, optimizeForSEO } from "./services/openai";
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
+  // Register content generation routes
+  app.use("/api/content", contentRoutes);
 
   // Dashboard stats
   app.get("/api/dashboard/stats", async (req, res) => {

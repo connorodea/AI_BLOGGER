@@ -1,0 +1,169 @@
+# tests/integration/test_ai_content.py
+
+import pytest
+import os
+from typing import Dict
+import yaml
+from blog_engine.integrations.ai.generator import (
+    AIContentGenerator,
+    ContentManager,
+    ContentGenerationError
+)
+
+# Test configuration
+@pytest.fixture
+def test_config() -> Dict:
+    """Load test configuration"""
+    # First try to get from environment
+    api_key = os.getenv('OPENAI_API_KEY')
+    
+    if not api_key:
+        # Try to load from config file
+        config_path = 'tests/test_config.yaml'
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+                api_key = config.get('services', {}).get('openai', {}).get('api_key')
+    
+    if not api_key:
+        pytest.skip("OpenAI API key not found in environment or test_config.yaml")
+    
+    return {
+        'services': {
+            'openai': {
+                'api_key': api_key,
+                'model': 'gpt-4',
+                'temperature': 0.7
+            }
+        },
+        'optimize_content': True
+    }
+
+@pytest.fixture
+async def content_manager(test_config):
+    """Create ContentManager instance"""
+    manager = ContentManager(test_config)
+    return manager
+
+@pytest.mark.asyncio
+async def test_basic_content_generation(content_manager):
+    """Test basic content generation"""
+    result = await content_manager.create_content(
+        topic="Python Programming Basics",
+        keywords=["python", "programming", "beginners"],
+        content_type="blog_post",
+        tone="educational",
+        length="short"
+    )
+    
+    assert 'content' in result
+    assert len(result['content']) > 0
+    assert 'usage' in result
+    assert 'model' in result
+    
+    # Check if all keywords are present
+    content_lower = result['content'].lower()
+    assert all(kw.lower() in content_lower for kw in ["python", "programming", "beginners"])
+    
+    # Check markdown formatting
+    assert '# ' in result['content']
+    assert '## ' in result['content']
+
+@pytest.mark.asyncio
+async def test_content_lengths(content_manager):
+    """Test different content lengths"""
+    lengths = ['short', 'medium', 'long']
+    word_counts = {}
+    
+    for length in lengths:
+        result = await content_manager.create_content(
+            topic="AI Technology",
+            keywords=["AI", "technology"],
+            length=length
+        )
+        
+        word_counts[length] = len(result['content'].split())
+    
+    # Verify relative lengths
+    assert word_counts['short'] < word_counts['medium'] < word_counts['long']
+
+@pytest.mark.asyncio
+async def test_different_tones(content_manager):
+    """Test different content tones"""
+    tones = ['professional', 'casual', 'technical']
+    
+    for tone in tones:
+        result = await content_manager.create_content(
+            topic="Data Science",
+            keywords=["data", "science"],
+            tone=tone
+        )
+        
+        assert 'content' in result
+        assert len(result['content']) > 0
+
+@pytest.mark.asyncio
+async def test_error_handling(content_manager):
+    """Test error handling"""
+    # Test with empty keywords
+    with pytest.raises(ContentGenerationError):
+        await content_manager.create_content(
+            topic="Test Topic",
+            keywords=[]
+        )
+    
+    # Test with invalid content type
+    with pytest.raises(ValueError):
+        await content_manager.create_content(
+            topic="Test Topic",
+            keywords=["test"],
+            content_type="invalid_type"
+        )
+
+@pytest.mark.asyncio
+async def test_content_optimization(content_manager):
+    """Test content optimization"""
+    result = await content_manager.create_content(
+        topic="SEO Best Practices",
+        keywords=["SEO", "optimization", "ranking"],
+        optimize_content=True
+    )
+    
+    content = result['content']
+    
+    # Check basic optimization results
+    assert len(content.split('\n\n')) >= 3  # At least 3 paragraphs
+    assert any(line.startswith('# ') for line in content.split('\n'))  # Has headers
+    assert any(line.startswith('## ') for line in content.split('\n'))  # Has subheaders
+    
+    # Check keyword density
+    content_lower = content.lower()
+    keyword_count = sum(content_lower.count(kw.lower()) for kw in ["SEO", "optimization", "ranking"])
+    word_count = len(content.split())
+    keyword_density = keyword_count / word_count
+    
+    assert 0.01 <= keyword_density <= 0.05  # Reasonable keyword density
+
+@pytest.mark.asyncio
+async def test_custom_prompts(test_config):
+    """Test custom prompt templates"""
+    # Add custom prompt to config
+    test_config['services']['openai']['custom_prompts'] = {
+        'blog_post_technical_medium': """
+        Write a technical blog post about {topic}.
+        Must include: code examples, technical details, and these keywords: {keywords}
+        """
+    }
+    
+    manager = ContentManager(test_config)
+    result = await manager.create_content(
+        topic="GraphQL API Design",
+        keywords=["GraphQL", "API", "schema"],
+        content_type="blog_post",
+        tone="technical",
+        length="medium"
+    )
+    
+    content = result['content']
+    assert 'GraphQL' in content
+    assert '```' in content  # Should include code blocks

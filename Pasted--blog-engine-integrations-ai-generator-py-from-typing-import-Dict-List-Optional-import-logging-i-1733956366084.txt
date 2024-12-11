@@ -1,0 +1,199 @@
+# blog_engine/integrations/ai/generator.py
+
+from typing import Dict, List, Optional
+import logging
+import json
+from openai import OpenAI
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+logger = logging.getLogger(__name__)
+
+class ContentGenerationError(Exception):
+    """Base exception for content generation errors"""
+    pass
+
+class AIContentGenerator:
+    def __init__(self, config: Dict):
+        self.config = config.get('services', {}).get('openai', {})
+        self.client = OpenAI(api_key=self.config.get('api_key'))
+        self.default_model = self.config.get('model', 'gpt-4')
+        self.default_temperature = self.config.get('temperature', 0.7)
+        
+        # Load custom prompts if provided
+        self.custom_prompts = self._load_custom_prompts()
+    
+    def _load_custom_prompts(self) -> Dict:
+        """Load custom prompts from configuration"""
+        return self.config.get('custom_prompts', {})
+    
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10)
+    )
+    async def generate_content(
+        self,
+        topic: str,
+        keywords: List[str],
+        content_type: str = 'blog_post',
+        tone: str = 'professional',
+        length: str = 'medium',
+        **kwargs
+    ) -> Dict:
+        """Generate content using AI"""
+        try:
+            # Get appropriate prompt template
+            prompt = self._get_prompt_template(content_type, tone, length)
+            
+            # Create system message
+            system_msg = {
+                "role": "system",
+                "content": "You are a professional blog writer with expertise in creating "
+                          "engaging, well-researched content. Focus on providing value "
+                          "while maintaining SEO best practices."
+            }
+            
+            # Create user message with prompt
+            user_msg = {
+                "role": "user",
+                "content": prompt.format(
+                    topic=topic,
+                    keywords=", ".join(keywords),
+                    **kwargs
+                )
+            }
+            
+            # Generate content
+            response = await self.client.chat.completions.create(
+                model=self.default_model,
+                messages=[system_msg, user_msg],
+                temperature=self.default_temperature,
+                max_tokens=4000,
+                n=1
+            )
+            
+            # Process response
+            content = response.choices[0].message.content
+            
+            # Validate content
+            self._validate_content(content, keywords)
+            
+            return {
+                'content': content,
+                'usage': response.usage.total_tokens,
+                'model': self.default_model
+            }
+            
+        except Exception as e:
+            logger.error(f"Content generation failed: {e}")
+            raise ContentGenerationError(f"Failed to generate content: {e}")
+    
+    def _get_prompt_template(self, content_type: str, tone: str, length: str) -> str:
+        """Get appropriate prompt template based on content type and parameters"""
+        # Check for custom prompt first
+        custom_key = f"{content_type}_{tone}_{length}"
+        if custom_key in self.custom_prompts:
+            return self.custom_prompts[custom_key]
+        
+        # Default prompt templates
+        templates = {
+            'blog_post': {
+                'base': """
+Write a comprehensive blog post about {topic}.
+
+Key requirements:
+- Write in a {tone} tone
+- Target length: {length_guide}
+- Include these keywords naturally: {keywords}
+- Use markdown formatting
+- Include:
+  * A compelling title
+  * Clear headings and subheadings
+  * An engaging introduction
+  * Well-structured main content
+  * A conclusive summary
+  * Call to action
+
+Structure the content to be easy to read and engage with.
+                """,
+                'length_guides': {
+                    'short': '800-1200 words',
+                    'medium': '1500-2000 words',
+                    'long': '2500-3000 words'
+                }
+            }
+            # Add more content types as needed
+        }
+        
+        base_template = templates.get(content_type, {}).get('base')
+        length_guide = templates.get(content_type, {}).get('length_guides', {}).get(length)
+        
+        if not base_template or not length_guide:
+            raise ValueError(f"Unsupported content type: {content_type}")
+            
+        return base_template.format(length_guide=length_guide, tone=tone)
+    
+    def _validate_content(self, content: str, keywords: List[str]) -> None:
+        """Validate generated content meets requirements"""
+        # Check minimum length
+        if len(content.split()) < 100:
+            raise ContentGenerationError("Generated content is too short")
+        
+        # Check keyword inclusion
+        for keyword in keywords:
+            if keyword.lower() not in content.lower():
+                raise ContentGenerationError(f"Keyword '{keyword}' not found in content")
+        
+        # Check markdown formatting
+        if '# ' not in content:
+            raise ContentGenerationError("Content lacks proper markdown headings")
+
+class ContentOptimizer:
+    """Optimizes generated content for various factors"""
+    
+    def __init__(self, config: Dict):
+        self.config = config
+    
+    async def optimize_seo(self, content: str, keywords: List[str]) -> str:
+        """Optimize content for SEO"""
+        pass
+    
+    async def optimize_readability(self, content: str) -> str:
+        """Optimize content for readability"""
+        pass
+    
+    async def optimize_engagement(self, content: str) -> str:
+        """Optimize content for engagement"""
+        pass
+
+class ContentManager:
+    """Manages content generation and optimization workflow"""
+    
+    def __init__(self, config: Dict):
+        self.config = config
+        self.generator = AIContentGenerator(config)
+        self.optimizer = ContentOptimizer(config)
+    
+    async def create_content(
+        self,
+        topic: str,
+        keywords: List[str],
+        **kwargs
+    ) -> Dict:
+        """Create and optimize content"""
+        # Generate initial content
+        result = await self.generator.generate_content(
+            topic=topic,
+            keywords=keywords,
+            **kwargs
+        )
+        
+        content = result['content']
+        
+        # Optimize content if enabled
+        if self.config.get('optimize_content', True):
+            content = await self.optimizer.optimize_seo(content, keywords)
+            content = await self.optimizer.optimize_readability(content)
+            content = await self.optimizer.optimize_engagement(content)
+        
+        result['content'] = content
+        return result
