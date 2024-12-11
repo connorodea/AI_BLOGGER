@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Wand2 } from "lucide-react";
+import { Wand2, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 interface ContentEditorProps {
   topic: any;
