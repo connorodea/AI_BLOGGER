@@ -1,37 +1,58 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { db } from "@db/index";
-import { posts, analytics, distributions } from "@db/schema";
-import { desc, eq, sql, and } from "drizzle-orm";
+import { db } from "../db";
+import { posts, analytics, distributions } from "../db/schema";
+import { desc, eq, sql } from "drizzle-orm";
 import contentRoutes from "./routes/content";
-import { analyzeTopics, optimizeForSEO } from "./services/openai";
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
-  // Register content generation routes
-  app.use("/api/content", contentRoutes);
+  // Register routes with error handling
+  app.use("/api/content", (req, res, next) => {
+    contentRoutes(req, res, next).catch(next);
+  });
 
-  // Dashboard stats
-  app.get("/api/dashboard/stats", async (req, res) => {
-    const totalPosts = await db.select({ count: sql`count(*)` }).from(posts);
-    const publishedPosts = await db.select({ count: sql`count(*)` })
-      .from(posts)
-      .where(eq(posts.status, "published"));
-    
-    const totalViews = await db.select({ sum: sql`sum(views)` }).from(analytics);
-    const totalRevenue = await db.select({ sum: sql`sum(revenue)` }).from(analytics);
+  // Dashboard stats with error handling
+  app.get("/api/dashboard/stats", async (req, res, next) => {
+    try {
+      const [
+        totalPosts,
+        publishedPosts,
+        totalViews,
+        totalRevenue,
+        performanceData
+      ] = await Promise.all([
+        db.select({ count: sql`count(*)` }).from(posts),
+        db.select({ count: sql`count(*)` })
+          .from(posts)
+          .where(eq(posts.status, "published")),
+        db.select({ sum: sql`sum(views)` }).from(analytics),
+        db.select({ sum: sql`sum(revenue)` }).from(analytics),
+        db.select()
+          .from(analytics)
+          .orderBy(desc(analytics.date))
+          .limit(30)
+      ]);
 
-    const performanceData = await db.select()
-      .from(analytics)
-      .orderBy(desc(analytics.date))
-      .limit(30);
+      res.json({
+        totalPosts: totalPosts[0].count,
+        publishedPosts: publishedPosts[0].count,
+        totalViews: totalViews[0].sum || 0,
+        totalRevenue: totalRevenue[0].sum || 0,
+        performanceData
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
 
-    res.json({
-      totalPosts: totalPosts[0].count,
-      publishedPosts: publishedPosts[0].count,
-      totalViews: totalViews[0].sum || 0,
-      totalRevenue: totalRevenue[0].sum || 0,
-      performanceData
+  // Global error handler
+  app.use((err: Error, req: any, res: any, next: any) => {
+    console.error('Server error:', err);
+    res.status(500).json({
+      error: process.env.NODE_ENV === 'production' 
+        ? 'Internal server error' 
+        : err.message
     });
   });
 
