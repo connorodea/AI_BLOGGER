@@ -58,24 +58,30 @@ export default function ContentGenerator() {
         <p className="text-muted-foreground">Create AI-powered content</p>
       </div>
 
-      <div className="flex gap-4">
+      <div className="flex gap-6">
         <Button
-          variant={step === 'research' ? 'default' : 'outline'}
+          variant={step === 'research' ? 'default' : 'ghost'}
           onClick={() => setStep('research')}
+          className="flex-1 h-12 text-lg"
+          size="lg"
         >
           1. Research
         </Button>
         <Button
-          variant={step === 'write' ? 'default' : 'outline'}
+          variant={step === 'write' ? 'default' : 'ghost'}
           onClick={() => setStep('write')}
           disabled={!selectedTopic}
+          className="flex-1 h-12 text-lg"
+          size="lg"
         >
           2. Write
         </Button>
         <Button
-          variant={step === 'optimize' ? 'default' : 'outline'}
+          variant={step === 'optimize' ? 'default' : 'ghost'}
           onClick={() => setStep('optimize')}
           disabled={!content}
+          className="flex-1 h-12 text-lg"
+          size="lg"
         >
           3. Optimize
         </Button>

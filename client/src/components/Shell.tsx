@@ -20,9 +20,9 @@ export function Shell({ children }: ShellProps) {
   return (
     <div className="flex min-h-screen">
       <div className="fixed inset-y-0 z-50 flex w-72 flex-col">
-        <div className="flex flex-1 flex-col bg-sidebar px-3 py-4 gap-2">
+        <div className="flex flex-1 flex-col bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 py-6 gap-4 border-r">
           <div className="mb-8">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent">
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-primary/90 to-blue-500 bg-clip-text text-transparent">
               BlogAI
             </h1>
           </div>
