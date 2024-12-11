@@ -184,13 +184,13 @@ export class SEOOptimizer {
       const response = await this.client.chat.completions.create({
         model: this.model,
         messages: [
-          { role: "system", content: "You are an SEO optimization expert." },
+          { role: "system", content: "You are an SEO expert." },
           { role: "user", content: prompt }
         ],
         response_format: { type: "json_object" }
       });
 
-      return JSON.parse(response.choices[0].message.content || '{}');
+      return JSON.parse(response.choices[0].message.content || '{}') as SEOAnalysis;
     });
   }
 
