@@ -4,8 +4,8 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-  "db:generate": "drizzle-kit generate:pg",
-  "db:migrate": "tsx db/migrate.ts",
+    "db:generate": "drizzle-kit generate:pg",
+    "db:migrate": "tsx db/migrate.ts",
     "dev": "tsx server/index.ts",
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "NODE_ENV=production node dist/index.js",
@@ -53,6 +53,7 @@
     "drizzle-zod": "^0.5.1",
     "embla-carousel-react": "^8.3.0",
     "express": "^4.21.2",
+    "express-rate-limit": "^7.4.1",
     "express-session": "^1.18.1",
     "framer-motion": "^11.13.1",
     "input-otp": "^1.2.4",
