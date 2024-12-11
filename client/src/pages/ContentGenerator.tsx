@@ -8,6 +8,7 @@ import { ContentEditor } from "@/components/ContentEditor";
 import { SEOPanel } from "@/components/SEOPanel";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { Loader2 } from "lucide-react";
 
 export default function ContentGenerator() {
   const [step, setStep] = useState<'research' | 'write' | 'optimize'>('research');
@@ -54,7 +55,9 @@ export default function ContentGenerator() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold">Content Generator</h1>
+        <h1 className="text-3xl font-bold bg-gradient-to-r from-primary/90 to-primary bg-clip-text text-transparent">
+          Content Generator
+        </h1>
         <p className="text-muted-foreground">Create AI-powered content</p>
       </div>
 
@@ -62,7 +65,9 @@ export default function ContentGenerator() {
         <Button
           variant={step === 'research' ? 'default' : 'ghost'}
           onClick={() => setStep('research')}
-          className="flex-1 h-12 text-lg"
+          className={`flex-1 h-12 text-lg transition-all duration-300 ${
+            step === 'research' ? 'shadow-lg' : ''
+          }`}
           size="lg"
         >
           1. Research
@@ -71,7 +76,9 @@ export default function ContentGenerator() {
           variant={step === 'write' ? 'default' : 'ghost'}
           onClick={() => setStep('write')}
           disabled={!selectedTopic}
-          className="flex-1 h-12 text-lg"
+          className={`flex-1 h-12 text-lg transition-all duration-300 ${
+            step === 'write' ? 'shadow-lg' : ''
+          }`}
           size="lg"
         >
           2. Write
@@ -80,14 +87,16 @@ export default function ContentGenerator() {
           variant={step === 'optimize' ? 'default' : 'ghost'}
           onClick={() => setStep('optimize')}
           disabled={!content}
-          className="flex-1 h-12 text-lg"
+          className={`flex-1 h-12 text-lg transition-all duration-300 ${
+            step === 'optimize' ? 'shadow-lg' : ''
+          }`}
           size="lg"
         >
           3. Optimize
         </Button>
       </div>
 
-      <Card className="p-6">
+      <Card className="p-6 hover:shadow-lg transition-all duration-200">
         {step === 'research' && (
           <TopicResearch onSelect={handleTopicSelect} />
         )}
@@ -107,8 +116,17 @@ export default function ContentGenerator() {
         <Button 
           onClick={handleGenerate}
           disabled={!content || generateMutation.isPending}
+          className="gap-2 min-w-[200px] h-12"
+          size="lg"
         >
-          Generate Post
+          {generateMutation.isPending ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Generating...
+            </>
+          ) : (
+            'Generate Post'
+          )}
         </Button>
       </div>
     </div>
