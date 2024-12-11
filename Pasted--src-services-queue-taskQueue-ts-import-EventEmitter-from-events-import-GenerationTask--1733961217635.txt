@@ -1,0 +1,141 @@
+// src/services/queue/taskQueue.ts
+
+import { EventEmitter } from 'events';
+import { GenerationTask, Config } from '@/types';
+import logger from '@/utils/logger';
+
+type TaskCallback = (task: GenerationTask) => Promise<void>;
+
+export class TaskQueue extends EventEmitter {
+  private queue: GenerationTask[] = [];
+  private processing: Set<string> = new Set();
+  private config: Config;
+  private taskCallback: TaskCallback;
+  private running: boolean = false;
+
+  constructor(config: Config, taskCallback: TaskCallback) {
+    super();
+    this.config = config;
+    this.taskCallback = taskCallback;
+  }
+
+  async start(): Promise<void> {
+    this.running = true;
+    this.processQueue();
+    logger.info('Task queue started');
+  }
+
+  async stop(): Promise<void> {
+    this.running = false;
+    logger.info('Task queue stopped');
+  }
+
+  async addTask(task: Omit<GenerationTask, 'id' | 'status' | 'createdAt'>): Promise<string> {
+    const id = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    const newTask: GenerationTask = {
+      ...task,
+      id,
+      status: 'pending',
+      createdAt: new Date(),
+    };
+
+    this.queue.push(newTask);
+    logger.info(`Task ${id} added to queue`);
+    
+    // Sort queue by priority
+    this.sortQueue();
+    
+    // Trigger queue processing
+    this.emit('taskAdded');
+    
+    return id;
+  }
+
+  async getTask(taskId: string): Promise<GenerationTask | undefined> {
+    return this.queue.find(task => task.id === taskId);
+  }
+
+  private sortQueue(): void {
+    const priorityValues = {
+      high: 3,
+      medium: 2,
+      low: 1,
+    };
+
+    this.queue.sort((a, b) => {
+      const priorityDiff = priorityValues[b.priority] - priorityValues[a.priority];
+      if (priorityDiff !== 0) return priorityDiff;
+      return a.createdAt.getTime() - b.createdAt.getTime();
+    });
+  }
+
+  private async processQueue(): Promise<void> {
+    if (!this.running) return;
+
+    try {
+      // Check if we can process more tasks
+      while (this.processing.size < this.config.queue.maxConcurrent && this.queue.length > 0) {
+        const nextTask = this.queue.find(task => task.status === 'pending');
+        if (!nextTask) break;
+
+        // Mark task as processing
+        nextTask.status = 'processing';
+        nextTask.startedAt = new Date();
+        this.processing.add(nextTask.id);
+
+        // Process task
+        this.processTask(nextTask).catch(error => {
+          logger.error(`Error processing task ${nextTask.id}:`, error);
+        });
+      }
+    } finally {
+      // Schedule next check
+      setTimeout(() => this.processQueue(), 1000);
+    }
+  }
+
+  private async processTask(task: GenerationTask): Promise<void> {
+    try {
+      await this.taskCallback(task);
+      
+      // Update task status
+      task.status = 'completed';
+      task.completedAt = new Date();
+      
+      logger.info(`Task ${task.id} completed successfully`);
+      
+    } catch (error) {
+      task.status = 'failed';
+      task.error = error instanceof Error ? error.message : 'Unknown error';
+      task.completedAt = new Date();
+      
+      logger.error(`Task ${task.id} failed:`, error);
+      
+    } finally {
+      // Remove from processing set
+      this.processing.delete(task.id);
+      
+      // Emit completion event
+      this.emit('taskCompleted', task);
+    }
+  }
+
+  getStats(): Record<string, any> {
+    return {
+      queueLength: this.queue.length,
+      processing: this.processing.size,
+      byStatus: {
+        pending: this.queue.filter(t => t.status === 'pending').length,
+        processing: this.queue.filter(t => t.status === 'processing').length,
+        completed: this.queue.filter(t => t.status === 'completed').length,
+        failed: this.queue.filter(t => t.status === 'failed').length,
+      },
+      byPriority: {
+        high: this.queue.filter(t => t.priority === 'high').length,
+        medium: this.queue.filter(t => t.priority === 'medium').length,
+        low: this.queue.filter(t => t.priority === 'low').length,
+      },
+    };
+  }
+}

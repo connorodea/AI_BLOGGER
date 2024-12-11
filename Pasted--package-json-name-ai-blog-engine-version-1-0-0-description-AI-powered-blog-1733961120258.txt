@@ -1,0 +1,205 @@
+# package.json
+{
+  "name": "ai-blog-engine",
+  "version": "1.0.0",
+  "description": "AI-powered blog content generation engine",
+  "main": "dist/server.js",
+  "scripts": {
+    "start": "node dist/server.js",
+    "dev": "nodemon src/server.ts",
+    "build": "tsc",
+    "lint": "eslint . --ext .ts",
+    "test": "jest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google-cloud/storage": "^7.7.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "openai": "^4.20.1",
+    "prom-client": "^15.1.0",
+    "winston": "^3.11.0",
+    "yaml": "^2.3.4",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.10",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^6.12.0",
+    "@typescript-eslint/parser": "^6.12.0",
+    "eslint": "^8.54.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.1",
+    "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.3.2"
+  }
+}
+
+# tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "moduleResolution": "node",
+    "baseUrl": "src",
+    "esModuleInterop": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@/*": ["*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "**/*.test.ts"]
+}
+
+# .env.example
+NODE_ENV=development
+PORT=3000
+OPENAI_API_KEY=your_openai_key
+STORAGE_BUCKET=your_bucket_name
+GCP_PROJECT_ID=your_project_id
+MAX_CONCURRENT_TASKS=5
+LOG_LEVEL=info
+
+# src/types/index.ts
+export interface Config {
+  services: {
+    openai: {
+      enabled: boolean;
+      apiKey: string;
+      model: string;
+      temperature: number;
+      maxRetries: number;
+    };
+    storage: {
+      type: 'local' | 'gcloud';
+      bucketName?: string;
+      projectId?: string;
+      outputDir?: string;
+    };
+  };
+  queue: {
+    maxConcurrent: number;
+    maxQueueSize: number;
+    defaultPriority: 'low' | 'medium' | 'high';
+  };
+  content: {
+    minWords: number;
+    maxWords: number;
+    defaultTone: string;
+    optimization: {
+      enabled: boolean;
+      minSeoScore: number;
+      minReadabilityScore: number;
+    };
+  };
+}
+
+export interface BlogPost {
+  id: string;
+  title: string;
+  content: string;
+  keywords: string[];
+  seoScore?: number;
+  readabilityScore?: number;
+  metadata: Record<string, any>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface GenerationTask {
+  id: string;
+  topic: string;
+  keywords: string[];
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  priority: 'low' | 'medium' | 'high';
+  result?: BlogPost;
+  error?: string;
+  createdAt: Date;
+  startedAt?: Date;
+  completedAt?: Date;
+}
+
+# src/config/index.ts
+import { z } from 'zod';
+import { Config } from '@/types';
+import yaml from 'yaml';
+import fs from 'fs';
+import path from 'path';
+
+const configSchema = z.object({
+  services: z.object({
+    openai: z.object({
+      enabled: z.boolean(),
+      apiKey: z.string(),
+      model: z.string(),
+      temperature: z.number(),
+      maxRetries: z.number(),
+    }),
+    storage: z.object({
+      type: z.enum(['local', 'gcloud']),
+      bucketName: z.string().optional(),
+      projectId: z.string().optional(),
+      outputDir: z.string().optional(),
+    }),
+  }),
+  queue: z.object({
+    maxConcurrent: z.number(),
+    maxQueueSize: z.number(),
+    defaultPriority: z.enum(['low', 'medium', 'high']),
+  }),
+  content: z.object({
+    minWords: z.number(),
+    maxWords: z.number(),
+    defaultTone: z.string(),
+    optimization: z.object({
+      enabled: z.boolean(),
+      minSeoScore: z.number(),
+      minReadabilityScore: z.number(),
+    }),
+  }),
+});
+
+export function loadConfig(): Config {
+  const configPath = path.join(process.cwd(), 'config.yaml');
+  const configFile = fs.readFileSync(configPath, 'utf8');
+  const parsedConfig = yaml.parse(configFile);
+  return configSchema.parse(parsedConfig);
+}
+
+# src/utils/logger.ts
+import winston from 'winston';
+
+const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+      ),
+    }),
+  ],
+});
+
+export default logger;

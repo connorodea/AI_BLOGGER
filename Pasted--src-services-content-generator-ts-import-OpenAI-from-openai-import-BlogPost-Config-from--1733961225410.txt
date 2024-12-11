@@ -1,0 +1,258 @@
+# src/services/content/generator.ts
+
+import OpenAI from 'openai';
+import { BlogPost, Config } from '@/types';
+import logger from '@/utils/logger';
+import { performance } from 'perf_hooks';
+
+export class ContentGenerator {
+  private openai: OpenAI;
+  private config: Config;
+
+  constructor(config: Config) {
+    this.config = config;
+    this.openai = new OpenAI({
+      apiKey: config.services.openai.apiKey,
+    });
+  }
+
+  async generateContent(topic: string, keywords: string[]): Promise<BlogPost> {
+    const startTime = performance.now();
+    logger.info(`Starting content generation for topic: ${topic}`);
+
+    try {
+      // Generate outline first
+      const outline = await this.generateOutline(topic, keywords);
+      
+      // Generate content based on outline
+      const content = await this.generateDetailedContent(topic, keywords, outline);
+      
+      // Create blog post object
+      const blogPost: BlogPost = {
+        id: this.generateId(),
+        title: content.title,
+        content: content.body,
+        keywords,
+        metadata: {
+          outline,
+          generationTime: performance.now() - startTime,
+          model: this.config.services.openai.model,
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      logger.info(`Content generated successfully for topic: ${topic}`);
+      return blogPost;
+
+    } catch (error) {
+      logger.error(`Content generation failed: ${error}`);
+      throw error;
+    }
+  }
+
+  private async generateOutline(topic: string, keywords: string[]): Promise<string[]> {
+    const prompt = `
+      Create a detailed outline for a blog post about ${topic}.
+      Keywords to include: ${keywords.join(', ')}
+      
+      Return the outline as a JSON array of main sections.
+    `;
+
+    const response = await this.openai.chat.completions.create({
+      model: this.config.services.openai.model,
+      messages: [
+        { role: "system", content: "You are a professional blog content strategist." },
+        { role: "user", content: prompt }
+      ],
+      temperature: this.config.services.openai.temperature,
+      response_format: { type: "json_object" }
+    });
+
+    const result = JSON.parse(response.choices[0].message.content);
+    return result.outline;
+  }
+
+  private async generateDetailedContent(
+    topic: string, 
+    keywords: string[], 
+    outline: string[]
+  ): Promise<{ title: string; body: string }> {
+    const prompt = `
+      Write a comprehensive blog post about ${topic}.
+      
+      Use this outline:
+      ${outline.join('\n')}
+      
+      Keywords to include: ${keywords.join(', ')}
+      
+      Requirements:
+      1. Write in a professional, engaging tone
+      2. Include a compelling title
+      3. Use markdown formatting
+      4. Include proper headings and subheadings
+      5. Minimum length: ${this.config.content.minWords} words
+      6. Maximum length: ${this.config.content.maxWords} words
+      7. Natural keyword placement
+      8. Include relevant examples
+      
+      Return as a JSON object with 'title' and 'body' keys.
+    `;
+
+    const response = await this.openai.chat.completions.create({
+      model: this.config.services.openai.model,
+      messages: [
+        { role: "system", content: "You are a professional blog writer." },
+        { role: "user", content: prompt }
+      ],
+      temperature: this.config.services.openai.temperature,
+      response_format: { type: "json_object" }
+    });
+
+    return JSON.parse(response.choices[0].message.content);
+  }
+
+  private generateId(): string {
+    return `post_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+}
+
+# src/services/content/optimizer.ts
+
+import OpenAI from 'openai';
+import { BlogPost, Config } from '@/types';
+import logger from '@/utils/logger';
+
+export class ContentOptimizer {
+  private openai: OpenAI;
+  private config: Config;
+
+  constructor(config: Config) {
+    this.config = config;
+    this.openai = new OpenAI({
+      apiKey: config.services.openai.apiKey,
+    });
+  }
+
+  async optimizeContent(post: BlogPost): Promise<BlogPost> {
+    if (!this.config.content.optimization.enabled) {
+      return post;
+    }
+
+    logger.info(`Starting content optimization for post: ${post.id}`);
+
+    try {
+      // Run SEO optimization
+      const seoScore = await this.analyzeSEO(post);
+      
+      // Run readability optimization
+      const readabilityScore = await this.analyzeReadability(post);
+      
+      // Optimize if scores are below thresholds
+      if (seoScore < this.config.content.optimization.minSeoScore ||
+          readabilityScore < this.config.content.optimization.minReadabilityScore) {
+        
+        post = await this.improveContent(post, { seoScore, readabilityScore });
+      }
+
+      // Update metadata
+      post.seoScore = seoScore;
+      post.readabilityScore = readabilityScore;
+      post.metadata.optimization = {
+        optimizedAt: new Date(),
+        originalSeoScore: seoScore,
+        originalReadabilityScore: readabilityScore,
+      };
+      post.updatedAt = new Date();
+
+      logger.info(`Content optimization completed for post: ${post.id}`);
+      return post;
+
+    } catch (error) {
+      logger.error(`Content optimization failed: ${error}`);
+      throw error;
+    }
+  }
+
+  private async analyzeSEO(post: BlogPost): Promise<number> {
+    const prompt = `
+      Analyze this blog post for SEO optimization.
+      Return a score between 0 and 1.
+      Consider:
+      1. Keyword usage and density
+      2. Heading structure
+      3. Meta description
+      4. Content length
+      5. Internal linking opportunities
+      
+      Content:
+      ${post.content}
+      
+      Keywords: ${post.keywords.join(', ')}
+      
+      Return only the numerical score.
+    `;
+
+    const response = await this.openai.chat.completions.create({
+      model: this.config.services.openai.model,
+      messages: [
+        { role: "system", content: "You are an SEO expert." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.1
+    });
+
+    return parseFloat(response.choices[0].message.content);
+  }
+
+  private async analyzeReadability(post: BlogPost): Promise<number> {
+    const prompt = `
+      Analyze this blog post for readability.
+      Return a score between 0 and 1.
+      Consider:
+      1. Sentence length
+      2. Paragraph structure
+      3. Active voice usage
+      4. Clear language
+      5. Reading level
+      
+      Content:
+      ${post.content}
+      
+      Return only the numerical score.
+    `;
+
+    const response = await this.openai.chat.completions.create({
+      model: this.config.services.openai.model,
+      messages: [
+        { role: "system", content: "You are a content editor." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.1
+    });
+
+    return parseFloat(response.choices[0].message.content);
+  }
+
+  private async improveContent(
+    post: BlogPost, 
+    scores: { seoScore: number; readabilityScore: number }
+  ): Promise<BlogPost> {
+    const prompt = `
+      Improve this blog post while maintaining its core message.
+      Current SEO score: ${scores.seoScore}
+      Current readability score: ${scores.readabilityScore}
+      
+      Focus on:
+      1. Natural keyword integration
+      2. Clear heading structure
+      3. Concise paragraphs
+      4. Active voice
+      5. Engaging language
+      
+      Original content:
+      ${post.content}
+      
+      Keywords: ${post.keywords.join(', ')}
+      
+      Return the

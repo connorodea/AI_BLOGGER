@@ -1,0 +1,177 @@
+# .gitignore
+node_modules/
+dist/
+*.log
+.env
+coverage/
+.DS_Store
+config.yaml
+
+# .eslintrc
+{
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint"],
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "env": {
+    "node": true,
+    "es6": true
+  },
+  "rules": {
+    "@typescript-eslint/explicit-function-return-type": "warn",
+    "@typescript-eslint/no-explicit-any": "warn",
+    "@typescript-eslint/no-unused-vars": "error"
+  }
+}
+
+# jest.config.js
+module.exports = {
+  preset: 'ts-jest',
+  testEnvironment: 'node',
+  roots: ['<rootDir>/src'],
+  transform: {
+    '^.+\\.tsx?$': 'ts-jest'
+  },
+  moduleNameMapper: {
+    '^@/(.*)$': '<rootDir>/src/$1'
+  },
+  testRegex: '(/__tests__/.*|(\\.|/)(test|spec))\\.tsx?$',
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node']
+};
+
+# README.md
+# AI Blog Engine
+
+A TypeScript-based AI blog content generation engine with task queue management.
+
+## Features
+
+- AI-powered content generation using OpenAI GPT models
+- Content optimization for SEO and readability
+- Task queue with priority handling
+- Express API with TypeScript
+- Prometheus metrics
+- Logging and monitoring
+- Rate limiting and security features
+
+## Installation
+
+```bash
+# Install dependencies
+npm install
+
+# Build project
+npm run build
+
+# Start server
+npm start
+```
+
+## API Usage
+
+Generate content:
+```bash
+curl -X POST http://localhost:3000/api/content/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "AI Trends 2024",
+    "keywords": ["artificial intelligence", "machine learning"],
+    "priority": "high"
+  }'
+```
+
+Check status:
+```bash
+curl http://localhost:3000/api/content/status/:taskId
+```
+
+Get queue stats:
+```bash
+curl http://localhost:3000/api/queue/stats
+```
+
+## Configuration
+
+Create a `config.yaml` file:
+
+```yaml
+services:
+  openai:
+    enabled: true
+    apiKey: "your-key"
+    model: "gpt-4"
+    temperature: 0.7
+    maxRetries: 3
+  
+queue:
+  maxConcurrent: 5
+  maxQueueSize: 100
+  defaultPriority: "medium"
+
+content:
+  minWords: 800
+  maxWords: 3000
+  defaultTone: "professional"
+  optimization:
+    enabled: true
+    minSeoScore: 0.8
+    minReadabilityScore: 0.7
+```
+
+## Development
+
+```bash
+# Run in development mode
+npm run dev
+
+# Run tests
+npm test
+
+# Type checking
+npm run typecheck
+
+# Linting
+npm run lint
+```
+
+## Docker
+
+```bash
+# Build image
+docker build -t ai-blog-engine .
+
+# Run container
+docker run -p 3000:3000 ai-blog-engine
+```
+
+## Environment Variables
+
+```bash
+NODE_ENV=development
+PORT=3000
+OPENAI_API_KEY=your_key
+```
+
+## Testing
+
+```bash
+# Run all tests
+npm test
+
+# Run with coverage
+npm test -- --coverage
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+MIT
