@@ -44,10 +44,28 @@ class AIContentGenerator {
       throw new Error('OpenAI API key is required');
     }
 
-    this.client = new OpenAI({ apiKey });
+    this.client = new OpenAI({ 
+      apiKey,
+      timeout: 30000, // 30 second timeout
+      maxRetries: 3
+    });
     this.defaultModel = 'gpt-4';
     this.defaultTemperature = 0.7;
     this.customPrompts = {};
+
+    // Verify API key validity
+    this.validateApiKey().catch(error => {
+      console.error('OpenAI API key validation failed:', error);
+      throw new Error('Invalid OpenAI API key configuration');
+    });
+  }
+
+  private async validateApiKey(): Promise<void> {
+    try {
+      await this.client.models.list();
+    } catch (error) {
+      throw new Error(`OpenAI API key validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   async generateContent(
