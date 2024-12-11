@@ -1,28 +1,28 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
 
-interface SEOAnalysis {
-  titleScore: number;
-  contentScore: number;
-  keywordScore: number;
-  readabilityScore: number;
-  structureScore: number;
-  optimizationSuggestions: string[];
-  keywordDensity: Record<string, number>;
-  readabilityMetrics: {
-    fleschScore: number;
-    avgSentenceLength: number;
-    avgWordLength: number;
-  };
-  improvements: Record<string, string[]>;
-  originalScores?: {
-    title: number;
-    content: number;
-    keywords: number;
-    readability: number;
-    structure: number;
-  };
-}
+// Define Zod schemas for validation
+const readabilityMetricsSchema = z.object({
+  fleschScore: z.number(),
+  avgSentenceLength: z.number(),
+  avgWordLength: z.number()
+});
+
+const seoAnalysisSchema = z.object({
+  titleScore: z.number(),
+  contentScore: z.number(),
+  keywordScore: z.number(),
+  readabilityScore: z.number(),
+  structureScore: z.number(),
+  optimizationSuggestions: z.array(z.string()),
+  keywordDensity: z.record(z.string(), z.number()),
+  readabilityMetrics: readabilityMetricsSchema,
+  improvements: z.record(z.string(), z.array(z.string()))
+});
+
+// TypeScript types based on Zod schemas
+type ReadabilityMetrics = z.infer<typeof readabilityMetricsSchema>;
+type SEOAnalysis = z.infer<typeof seoAnalysisSchema>;
 
 interface RetryConfig {
   maxAttempts: number;
@@ -36,7 +36,7 @@ export class SEOOptimizer {
   private retryConfig: RetryConfig = {
     maxAttempts: 3,
     initialDelay: 1000,
-    maxDelay: 10000,
+    maxDelay: 10000
   };
 
   constructor() {
@@ -48,10 +48,7 @@ export class SEOOptimizer {
     this.client = new OpenAI({ 
       apiKey,
       timeout: 60000,
-      maxRetries: 5,
-      defaultHeaders: {
-        'OpenAI-Beta': 'assistants=v1'
-      }
+      maxRetries: 5
     });
   }
 
@@ -109,16 +106,7 @@ export class SEOOptimizer {
           structureScoreImprovement: finalAnalysis.structureScore - initialAnalysis.structureScore
         });
 
-        return {
-          ...finalAnalysis,
-          originalScores: {
-            title: initialAnalysis.titleScore,
-            content: initialAnalysis.contentScore,
-            keywords: initialAnalysis.keywordScore,
-            readability: initialAnalysis.readabilityScore,
-            structure: initialAnalysis.structureScore
-          }
-        };
+        return finalAnalysis;
       }
 
       console.log('Content already well-optimized, no improvements needed');
@@ -126,18 +114,9 @@ export class SEOOptimizer {
 
     } catch (error) {
       console.error('SEO optimization failed:', error);
-      
-      // Provide detailed error information
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const errorDetails = {
-        timestamp: new Date().toISOString(),
-        keywords,
-        contentLength: content.length,
-        error: errorMessage
-      };
-      
-      console.error('Error details:', errorDetails);
-      throw new Error(`SEO optimization failed: ${errorMessage}`);
+      throw new Error(
+        `SEO optimization failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
 
@@ -162,23 +141,19 @@ export class SEOOptimizer {
 
         Analyze and return a JSON object with:
         1. Scores (0-1):
-           - Title effectiveness (keyword presence, length, click appeal)
-           - Content quality (depth, originality, relevance)
-           - Keyword optimization (density, placement, LSI terms)
-           - Readability (sentence length, word choice, structure)
-           - Content structure (headings, paragraphs, flow)
-        
-        2. Detailed analysis:
-           - Keyword density per term
-           - Readability metrics (Flesch score, avg sentence length)
-           - Structure analysis (heading hierarchy, section balance)
-           - Missing key elements
-           - Competitive advantages
-        
-        3. Actionable improvements:
-           - Specific suggestions for each low-scoring area
-           - Priority order for implementations
-           - Expected impact of changes
+           - titleScore: title effectiveness
+           - contentScore: content quality
+           - keywordScore: keyword optimization
+           - readabilityScore: text readability
+           - structureScore: content structure
+        2. optimizationSuggestions: array of string suggestions
+        3. keywordDensity: object mapping keywords to density
+        4. readabilityMetrics: {
+           fleschScore: number,
+           avgSentenceLength: number,
+           avgWordLength: number
+        }
+        5. improvements: object mapping categories to arrays of suggestions
       `;
 
       const response = await this.client.chat.completions.create({
@@ -190,7 +165,15 @@ export class SEOOptimizer {
         response_format: { type: "json_object" }
       });
 
-      return JSON.parse(response.choices[0].message.content || '{}') as SEOAnalysis;
+      const result = response.choices[0].message.content;
+      if (!result) throw new Error('No analysis generated');
+
+      try {
+        return seoAnalysisSchema.parse(JSON.parse(result));
+      } catch (error) {
+        console.error('Failed to parse SEO analysis:', error);
+        throw new Error('Invalid SEO analysis format returned');
+      }
     });
   }
 
@@ -232,7 +215,6 @@ export class SEOOptimizer {
         ${content}
 
         Return only the improved content in markdown format.
-        Include clear section breaks and formatting.
       `;
 
       const response = await this.client.chat.completions.create({
