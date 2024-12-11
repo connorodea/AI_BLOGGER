@@ -177,25 +177,43 @@ class AIContentGenerator {
       short: '800-1200 words',
       medium: '1500-2000 words',
       long: '2500-3000 words'
-    };
+    } as const;
+
+    const toneGuide = {
+      professional: 'Use formal language and industry-specific terminology',
+      casual: 'Write in a conversational, friendly tone',
+      technical: 'Focus on detailed technical explanations with proper terminology'
+    } as const;
 
     return `
-Write a comprehensive blog post about {topic}.
+Write a high-quality ${contentType} about {topic}.
 
-Key requirements:
-- Write in a ${tone} tone
-- Target length: ${lengthGuides[length as keyof typeof lengthGuides]}
-- Include these keywords naturally: {keywords}
-- Use markdown formatting
-- Include:
-  * A compelling title
-  * Clear headings and subheadings
-  * An engaging introduction
-  * Well-structured main content
-  * A conclusive summary
-  * Call to action
+Content Requirements:
+1. Style and Tone:
+   - Write in a ${tone} tone
+   - ${toneGuide[tone as keyof typeof toneGuide]}
+   - Target length: ${lengthGuides[length as keyof typeof lengthGuides]}
 
-Structure the content to be easy to read and engage with.
+2. SEO Optimization:
+   - Include these keywords naturally: {keywords}
+   - Optimize headings for SEO
+   - Include meta description suggestions
+
+3. Structure (Use Markdown):
+   - Compelling title (H1)
+   - Clear section headings (H2) and subheadings (H3)
+   - Engaging introduction with hook
+   - Well-structured main content with examples
+   - Actionable conclusion
+   - Call to action
+
+4. Engagement Elements:
+   - Include 2-3 relevant statistics or data points
+   - Add practical examples or case studies
+   - Suggest pull quotes for social media
+   - Include questions to engage readers
+
+Make the content informative, engaging, and optimized for both readers and search engines.
     `.trim();
   }
 
