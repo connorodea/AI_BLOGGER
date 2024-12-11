@@ -12,6 +12,7 @@ interface ContentEditorProps {
 
 export function ContentEditor({ topic, content, onChange }: ContentEditorProps) {
   const [isGenerating, setIsGenerating] = useState(false);
+  const { toast } = useToast();
 
   const handleGenerate = async () => {
     setIsGenerating(true);
@@ -22,12 +23,25 @@ export function ContentEditor({ topic, content, onChange }: ContentEditorProps) 
         body: JSON.stringify({ topic })
       });
       
-      if (!res.ok) throw new Error("Failed to generate content");
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || "Failed to generate content");
+      }
       
       const data = await res.json();
       onChange(data.content);
+      
+      toast({
+        title: "Content Generated",
+        description: "AI has successfully generated your content. Feel free to edit it further.",
+      });
     } catch (error) {
       console.error("Error generating content:", error);
+      toast({
+        title: "Generation Failed",
+        description: error instanceof Error ? error.message : "Failed to generate content",
+        variant: "destructive",
+      });
     } finally {
       setIsGenerating(false);
     }
@@ -47,8 +61,17 @@ export function ContentEditor({ topic, content, onChange }: ContentEditorProps) 
           disabled={isGenerating}
           className="gap-2"
         >
-          <Wand2 className="h-4 w-4" />
-          Generate Content
+          {isGenerating ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Generating...
+            </>
+          ) : (
+            <>
+              <Wand2 className="h-4 w-4" />
+              Generate Content
+            </>
+          )}
         </Button>
       </div>
 
