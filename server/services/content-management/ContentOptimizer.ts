@@ -26,9 +26,25 @@ export class ContentOptimizer {
 
     this.client = new OpenAI({ 
       apiKey,
-      timeout: 30000,
-      maxRetries: 3
+      timeout: 60000,
+      maxRetries: 5,
+      defaultHeaders: {
+        'OpenAI-Beta': 'assistants=v1'
+      }
     });
+  }
+
+  private async retryOperation<T>(operation: () => Promise<T>, maxAttempts = 3): Promise<T> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        console.error(`Attempt ${attempt} failed:`, error);
+        if (attempt === maxAttempts) throw error;
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+      }
+    }
+    throw new Error('All retry attempts failed');
   }
 
   async optimizeContent(

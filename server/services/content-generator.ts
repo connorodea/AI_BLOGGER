@@ -46,26 +46,29 @@ class AIContentGenerator {
 
     this.client = new OpenAI({ 
       apiKey,
-      timeout: 30000, // 30 second timeout
-      maxRetries: 3
+      timeout: 60000, // 60 second timeout
+      maxRetries: 5,
+      defaultHeaders: {
+        'OpenAI-Beta': 'assistants=v1'
+      }
     });
     this.defaultModel = 'gpt-4';
     this.defaultTemperature = 0.7;
     this.customPrompts = {};
-
-    // Verify API key validity
-    this.validateApiKey().catch(error => {
-      console.error('OpenAI API key validation failed:', error);
-      throw new Error('Invalid OpenAI API key configuration');
-    });
   }
 
-  private async validateApiKey(): Promise<void> {
-    try {
-      await this.client.models.list();
-    } catch (error) {
-      throw new Error(`OpenAI API key validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  private async retryOperation<T>(operation: () => Promise<T>, maxAttempts = 3): Promise<T> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        console.error(`Attempt ${attempt} failed:`, error);
+        if (attempt === maxAttempts) throw error;
+        // Exponential backoff
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+      }
     }
+    throw new Error('All retry attempts failed');
   }
 
   async generateContent(
