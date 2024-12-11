@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
+import { seoOptimizer } from './SEOOptimizer';
 
 interface OptimizationResult {
   optimizedContent: string;
@@ -10,6 +11,7 @@ interface OptimizationResult {
     accuracy: number;
     coherence: number;
   };
+  seoAnalysis?: any;
 }
 
 export class ContentOptimizer {
@@ -35,21 +37,40 @@ export class ContentOptimizer {
   ): Promise<OptimizationResult> {
     try {
       // Check content quality
-      const metrics = await this.checkQuality(content);
+      const [metrics, seoAnalysis] = await Promise.all([
+        this.checkQuality(content),
+        seoOptimizer.optimizeContent(content, keywords)
+      ]);
       
       // Improve content if needed
       let optimizedContent = content;
-      if (Object.values(metrics).some(score => score < 0.8)) {
+      const needsImprovement = Object.values(metrics).some(score => score < 0.8);
+      
+      if (needsImprovement) {
         const issues = Object.entries(metrics)
           .filter(([_, score]) => score < 0.8)
           .map(([key]) => key);
           
-        optimizedContent = await this.improveContent(content, issues, keywords);
+        // Improve content with enhanced quality checks
+        optimizedContent = await this.improveContent(content, issues, keywords, seoAnalysis);
+        
+        // Recheck quality after improvements
+        const [updatedMetrics, updatedSeoAnalysis] = await Promise.all([
+          this.checkQuality(optimizedContent),
+          seoOptimizer.optimizeContent(optimizedContent, keywords)
+        ]);
+
+        return {
+          optimizedContent,
+          metrics: updatedMetrics,
+          seoAnalysis: updatedSeoAnalysis
+        };
       }
 
       return {
         optimizedContent,
-        metrics
+        metrics,
+        seoAnalysis
       };
     } catch (error) {
       console.error('Content optimization failed:', error);
@@ -84,12 +105,17 @@ export class ContentOptimizer {
   private async improveContent(
     content: string, 
     issues: string[],
-    keywords: string[]
+    keywords: string[],
+    seoAnalysis: any
   ): Promise<string> {
     const prompt = `
       Improve this content focusing on: ${issues.join(', ')}
       
+      SEO Analysis:
+      ${JSON.stringify(seoAnalysis, null, 2)}
+      
       Requirements:
+      - Address SEO improvements suggested in the analysis
       - Maintain the same structure and key points
       - Naturally incorporate these keywords: ${keywords.join(', ')}
       - Keep the tone consistent
