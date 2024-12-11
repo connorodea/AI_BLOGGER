@@ -1,10 +1,18 @@
 import express, { type Request, Response, NextFunction } from "express";
+import rateLimit from 'express-rate-limit';
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100 // limit each IP to 100 requests per windowMs
+});
+
+app.use('/api/', limiter);
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -41,10 +49,15 @@ app.use((req, res, next) => {
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    const message = process.env.NODE_ENV === 'production' 
+      ? 'Internal Server Error' 
+      : err.message || 'Internal Server Error';
 
+    if (process.env.NODE_ENV !== 'production') {
+      console.error(err);
+    }
+    
     res.status(status).json({ message });
-    throw err;
   });
 
   // importantly only setup vite in development and after
