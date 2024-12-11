@@ -19,11 +19,14 @@ export function Shell({ children }: ShellProps) {
 
   return (
     <div className="flex min-h-screen">
-      <div className="fixed inset-y-0 z-50 flex w-72 flex-col">
+      <div className="fixed inset-y-0 z-50 flex flex-col lg:w-72 w-20 transition-all duration-300">
         <div className="flex flex-1 flex-col bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 py-6 gap-4 border-r">
           <div className="mb-8">
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-primary/90 to-blue-500 bg-clip-text text-transparent">
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-primary/90 to-blue-500 bg-clip-text text-transparent lg:block hidden">
               BlogAI
+            </h1>
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-primary/90 to-blue-500 bg-clip-text text-transparent lg:hidden block">
+              B
             </h1>
           </div>
           
@@ -39,7 +42,7 @@ export function Shell({ children }: ShellProps) {
                         className="w-full justify-start gap-2"
                       >
                         <Icon className="h-4 w-4" />
-                        {item.name}
+                        <span className="lg:inline hidden">{item.name}</span>
                       </Button>
                     </Link>
                   </li>
@@ -50,8 +53,8 @@ export function Shell({ children }: ShellProps) {
         </div>
       </div>
 
-      <main className="pl-72 w-full">
-        <div className="px-8 py-6">
+      <main className="lg:pl-72 pl-20 w-full">
+        <div className="px-4 lg:px-8 py-6">
           {children}
         </div>
       </main>
