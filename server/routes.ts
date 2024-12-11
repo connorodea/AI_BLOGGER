@@ -58,16 +58,14 @@ export function registerRoutes(app: Express): Server {
 
   // SEO analysis
   app.post("/api/seo/analyze", async (req, res) => {
-    const { content } = req.body;
-    // Implement SEO analysis logic
-    res.json({
-      score: 85,
-      suggestions: [
-        "Add more relevant keywords",
-        "Improve heading structure",
-        "Optimize meta description"
-      ]
-    });
+    try {
+      const { content, keywords } = req.body;
+      const result = await optimizeForSEO(content, keywords);
+      res.json(result);
+    } catch (error) {
+      console.error("Error analyzing SEO:", error);
+      res.status(500).json({ message: "Failed to analyze SEO" });
+    }
   });
 
   // SEO optimization
