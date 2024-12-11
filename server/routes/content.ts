@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../../db';
 import { posts } from '../../db/schema';
 import { contentGenerator } from '../services/content-generator';
+import { imageGenerator } from '../services/image-generator';
 import { eq } from 'drizzle-orm';
 
 const router = express.Router();
@@ -21,16 +22,24 @@ router.post('/generate', async (req, res) => {
   try {
     const validatedData = generateContentSchema.parse(req.body);
     
-    // Generate content using AI
-    const result = await contentGenerator.generateContent(
-      validatedData.topic,
-      validatedData.keywords,
-      {
-        contentType: validatedData.contentType,
-        tone: validatedData.tone,
-        length: validatedData.length,
-      }
-    );
+    // Generate content and feature image in parallel
+    const [contentResult, imageUrl] = await Promise.all([
+      contentGenerator.generateContent(
+        validatedData.topic,
+        validatedData.keywords,
+        {
+          contentType: validatedData.contentType,
+          tone: validatedData.tone,
+          length: validatedData.length,
+        }
+      ),
+      imageGenerator.generateImage(validatedData.topic, {
+        width: 1024,
+        height: 1024,
+        numInferenceSteps: 4,
+        randomizeSeed: true,
+      }),
+    ]);
 
     // Create slug from topic
     const slug = validatedData.topic
@@ -41,17 +50,18 @@ router.post('/generate', async (req, res) => {
     // Save to database
     const [post] = await db.insert(posts).values({
       title: validatedData.topic,
-      content: result.content,
+      content: contentResult.content,
       slug,
       keywords: validatedData.keywords,
       category: validatedData.contentType,
       status: 'draft',
       metadata: {
         generationDetails: {
-          model: result.model,
+          model: contentResult.model,
           tone: validatedData.tone,
           length: validatedData.length,
-          tokenUsage: result.usage
+          tokenUsage: contentResult.usage,
+          featureImage: imageUrl
         }
       }
     }).returning();
@@ -60,8 +70,9 @@ router.post('/generate', async (req, res) => {
       success: true,
       post,
       generationDetails: {
-        tokenUsage: result.usage,
-        model: result.model
+        tokenUsage: contentResult.usage,
+        model: contentResult.model,
+        featureImage: imageUrl
       }
     });
   } catch (error) {

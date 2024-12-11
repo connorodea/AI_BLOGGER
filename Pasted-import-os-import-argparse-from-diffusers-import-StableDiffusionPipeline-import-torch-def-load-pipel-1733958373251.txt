@@ -1,0 +1,64 @@
+import os
+import argparse
+from diffusers import StableDiffusionPipeline
+import torch
+
+def load_pipeline(api_token, model_id):
+    """
+    Load the specified Stable Diffusion model pipeline.
+    """
+    pipeline = StableDiffusionPipeline.from_pretrained(
+        model_id,
+        torch_dtype=torch.float16,
+        use_auth_token=api_token
+    )
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    pipeline = pipeline.to(device)
+    return pipeline
+
+def generate_image(prompt, output_path, api_token, model_id):
+    """
+    Generate an image based on the given prompt and save it to the output path.
+    """
+    pipeline = load_pipeline(api_token, model_id)
+    
+    print(f"Generating image for prompt: {prompt}")
+    image = pipeline(prompt).images[0]
+
+    # Save the generated image
+    image.save(output_path)
+    print(f"Image saved to {output_path}")
+
+def main():
+    """
+    Main function to parse arguments and generate an image.
+    """
+    # List of available models
+    available_models = [
+        "CompVis/stable-diffusion-v1-4",
+        "runwayml/stable-diffusion-v1-5",
+        "stabilityai/stable-diffusion-2-1",
+        "prompthero/openjourney-v2",
+        "dreamlike-art/dreamlike-photoreal-2.0"
+    ]
+
+    # Parse arguments
+    parser = argparse.ArgumentParser(description="Generate images using Stable Diffusion.")
+    parser.add_argument("--prompt", type=str, required=True, help="Prompt describing the image.")
+    parser.add_argument("--output", type=str, default="generated_image.png", help="Path to save the generated image.")
+    parser.add_argument("--model_id", type=str, default=available_models[0], help=f"Stable Diffusion model ID. Available options: {', '.join(available_models)}")
+    parser.add_argument("--api_token", type=str, default=os.getenv("HF_API_TOKEN"), help="Hugging Face API token.")
+    
+    args = parser.parse_args()
+
+    if not args.api_token:
+        raise ValueError("API token is required. Pass it as an argument or set the HF_API_TOKEN environment variable.")
+
+    if args.model_id not in available_models:
+        raise ValueError(f"Invalid model_id. Available options are: {', '.join(available_models)}")
+
+    # Generate the image
+    generate_image(args.prompt, args.output, args.api_token, args.model_id)
+
+if __name__ == "__main__":
+    main()
