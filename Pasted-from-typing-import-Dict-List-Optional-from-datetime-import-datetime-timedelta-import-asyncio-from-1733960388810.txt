@@ -1,0 +1,225 @@
+from typing import Dict, List, Optional
+from datetime import datetime, timedelta
+import asyncio
+from dataclasses import dataclass
+import numpy as np
+from sklearn.cluster import KMeans
+from sklearn.feature_extraction.text import TfidfVectorizer
+import pandas as pd
+from openai import OpenAI
+
+@dataclass
+class ContentCluster:
+    topic: str
+    keywords: List[str]
+    subtopics: List[str]
+    difficulty: float
+    estimated_impact: float
+    target_audience: List[str]
+    content_type: str
+
+@dataclass
+class ContentPlanItem:
+    topic: str
+    publish_date: datetime
+    keywords: List[str]
+    cluster: Optional[ContentCluster]
+    content_brief: Dict
+    estimated_time: int
+    priority: int
+
+class ContentPlanner:
+    def __init__(self, config: Dict):
+        self.config = config
+        self.client = OpenAI(api_key=config['services']['openai']['api_key'])
+        self.vectorizer = TfidfVectorizer(max_features=1000)
+    
+    async def create_content_calendar(
+        self,
+        niche: str,
+        start_date: datetime,
+        end_date: datetime,
+        posts_per_week: int = 2
+    ) -> List[ContentPlanItem]:
+        """Create optimized content calendar"""
+        # Generate topic ideas
+        topics = await self._generate_topic_ideas(niche)
+        
+        # Cluster topics
+        clusters = await self._cluster_topics(topics)
+        
+        # Create publication schedule
+        schedule = await self._create_schedule(
+            clusters,
+            start_date,
+            end_date,
+            posts_per_week
+        )
+        
+        return schedule
+    
+    async def _generate_topic_ideas(self, niche: str) -> List[Dict]:
+        """Generate comprehensive list of topic ideas"""
+        prompt = f"""
+        Generate a list of 30 blog post topics for the {niche} niche.
+        For each topic include:
+        1. Main topic title
+        2. 3-5 target keywords
+        3. Estimated difficulty (1-10)
+        4. Target audience segments
+        5. Potential content type (how-to, listicle, case study, etc.)
+        
+        Format as JSON array with keys:
+        topic, keywords, difficulty, audience, content_type
+        """
+        
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a content strategy expert."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={ "type": "json_object" }
+        )
+        
+        return response.choices[0].message.content['topics']
+    
+    async def _cluster_topics(self, topics: List[Dict]) -> List[ContentCluster]:
+        """Cluster topics into related groups"""
+        # Create topic vectors
+        texts = [f"{t['topic']} {' '.join(t['keywords'])}" for t in topics]
+        vectors = self.vectorizer.fit_transform(texts)
+        
+        # Determine optimal number of clusters
+        n_clusters = min(len(topics) // 3, 10)
+        
+        # Perform clustering
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+        clusters = kmeans.fit_predict(vectors)
+        
+        # Group topics by cluster
+        clustered_topics = {}
+        for topic, cluster_id in zip(topics, clusters):
+            if cluster_id not in clustered_topics:
+                clustered_topics[cluster_id] = []
+            clustered_topics[cluster_id].append(topic)
+        
+        # Create ContentCluster objects
+        content_clusters = []
+        for cluster_id, cluster_topics in clustered_topics.items():
+            # Find main topic for cluster
+            main_topic = max(cluster_topics, key=lambda x: x['difficulty'])
+            
+            # Collect all keywords
+            keywords = set()
+            for topic in cluster_topics:
+                keywords.update(topic['keywords'])
+            
+            # Create cluster
+            cluster = ContentCluster(
+                topic=main_topic['topic'],
+                keywords=list(keywords),
+                subtopics=[t['topic'] for t in cluster_topics if t != main_topic],
+                difficulty=np.mean([t['difficulty'] for t in cluster_topics]),
+                estimated_impact=len(cluster_topics) * 0.7,  # Simple impact score
+                target_audience=list(set(sum([t['audience'] for t in cluster_topics], []))),
+                content_type=max(set(t['content_type'] for t in cluster_topics), 
+                               key=lambda x: sum(1 for t in cluster_topics if t['content_type'] == x))
+            )
+            content_clusters.append(cluster)
+        
+        return content_clusters
+    
+    async def _create_schedule(
+        self,
+        clusters: List[ContentCluster],
+        start_date: datetime,
+        end_date: datetime,
+        posts_per_week: int
+    ) -> List[ContentPlanItem]:
+        """Create optimized publication schedule"""
+        schedule = []
+        current_date = start_date
+        
+        # Sort clusters by estimated impact
+        sorted_clusters = sorted(clusters, key=lambda x: x.estimated_impact, reverse=True)
+        
+        # Calculate post dates
+        post_dates = []
+        while current_date <= end_date:
+            for _ in range(posts_per_week):
+                if current_date <= end_date:
+                    post_dates.append(current_date)
+                    current_date += timedelta(days=7 // posts_per_week)
+        
+        # Assign topics to dates
+        cluster_idx = 0
+        for post_date in post_dates:
+            cluster = sorted_clusters[cluster_idx % len(sorted_clusters)]
+            
+            # Generate content brief
+            brief = await self._generate_content_brief(
+                cluster.topic,
+                cluster.keywords,
+                cluster.target_audience
+            )
+            
+            # Create plan item
+            plan_item = ContentPlanItem(
+                topic=cluster.topic,
+                publish_date=post_date,
+                keywords=cluster.keywords,
+                cluster=cluster,
+                content_brief=brief,
+                estimated_time=int(cluster.difficulty * 30),  # Rough time estimate
+                priority=int(cluster.estimated_impact * 10)
+            )
+            schedule.append(plan_item)
+            cluster_idx += 1
+        
+        return schedule
+    
+    async def _generate_content_brief(
+        self,
+        topic: str,
+        keywords: List[str],
+        audience: List[str]
+    ) -> Dict:
+        """Generate detailed content brief"""
+        prompt = f"""
+        Create a detailed content brief for:
+        Topic: {topic}
+        Keywords: {', '.join(keywords)}
+        Target Audience: {', '.join(audience)}
+        
+        Include:
+        1. Main angle and approach
+        2. Key points to cover
+        3. Suggested structure
+        4. Research sources
+        5. Content goals
+        6. SEO guidelines
+        
+        Format as JSON with these keys.
+        """
+        
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a content strategist."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={ "type": "json_object" }
+        )
+        
+        return response.choices[0].message.content
+    
+    async def analyze_content_gaps(self, niche: str, current_content: List[Dict]) -> Dict:
+        """Analyze content gaps and opportunities"""
+        # TODO: Implement content gap analysis
+        pass
+    
+    async def suggest_content_updates(self, content: List[Dict]) -> List[Dict]:
+        """Suggest updates for existing content"""
+        # TODO: Implement content update suggestions
+        pass

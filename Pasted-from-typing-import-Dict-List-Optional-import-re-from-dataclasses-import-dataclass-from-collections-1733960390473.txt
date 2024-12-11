@@ -1,0 +1,192 @@
+from typing import Dict, List, Optional
+import re
+from dataclasses import dataclass
+from collections import Counter
+import nltk
+from nltk.tokenize import sent_tokenize, word_tokenize
+from openai import OpenAI
+import json
+import asyncio
+
+nltk.download('punkt', quiet=True)
+nltk.download('stopwords', quiet=True)
+
+@dataclass
+class SEOAnalysis:
+    title_score: float
+    content_score: float
+    keyword_score: float
+    readability_score: float
+    structure_score: float
+    optimization_suggestions: List[str]
+    keyword_density: Dict[str, float]
+    readability_metrics: Dict[str, float]
+    improvements: Dict[str, List[str]]
+
+class SEOOptimizer:
+    def __init__(self, config: Dict):
+        self.config = config
+        self.client = OpenAI(api_key=config['services']['openai']['api_key'])
+        self.stopwords = set(nltk.corpus.stopwords.words('english'))
+    
+    async def optimize_content(
+        self,
+        content: Dict,
+        keywords: List[str],
+        target_metrics: Optional[Dict] = None
+    ) -> Dict:
+        """Optimize content for SEO"""
+        # Analyze current content
+        analysis = await self._analyze_content(content, keywords)
+        
+        # Determine if optimization is needed
+        if self._needs_optimization(analysis, target_metrics):
+            # Optimize different aspects in parallel
+            tasks = [
+                self._optimize_title(content['title'], keywords),
+                self._optimize_content_body(content['content'], keywords, analysis),
+                self._optimize_structure(content['content'], analysis),
+                self._generate_meta_description(content, keywords)
+            ]
+            
+            title, body, structure, meta = await asyncio.gather(*tasks)
+            
+            optimized_content = {
+                'title': title,
+                'content': body if body else content['content'],
+                'structure': structure if structure else content['structure'],
+                'meta_description': meta,
+                'seo_analysis': analysis.__dict__
+            }
+            
+            # Verify optimization results
+            final_analysis = await self._analyze_content(optimized_content, keywords)
+            optimized_content['final_seo_analysis'] = final_analysis.__dict__
+            
+            return optimized_content
+        
+        return {**content, 'seo_analysis': analysis.__dict__}
+    
+    async def _analyze_content(self, content: Dict, keywords: List[str]) -> SEOAnalysis:
+        """Perform comprehensive SEO analysis"""
+        text = content['content']
+        title = content['title']
+        
+        # Analyze different aspects
+        title_score = self._analyze_title(title, keywords)
+        keyword_analysis = self._analyze_keywords(text, keywords)
+        readability = self._analyze_readability(text)
+        structure = self._analyze_structure(text)
+        
+        # Calculate overall scores
+        keyword_score = sum(keyword_analysis['density'].values()) / len(keywords)
+        
+        # Get improvement suggestions
+        suggestions = await self._get_improvement_suggestions(
+            content,
+            keywords,
+            {
+                'title_score': title_score,
+                'keyword_score': keyword_score,
+                'readability': readability,
+                'structure': structure
+            }
+        )
+        
+        return SEOAnalysis(
+            title_score=title_score,
+            content_score=(keyword_score + readability['score']) / 2,
+            keyword_score=keyword_score,
+            readability_score=readability['score'],
+            structure_score=structure['score'],
+            optimization_suggestions=suggestions,
+            keyword_density=keyword_analysis['density'],
+            readability_metrics=readability,
+            improvements=self._generate_improvements(
+                title_score,
+                keyword_score,
+                readability['score'],
+                structure['score']
+            )
+        )
+    
+    def _analyze_title(self, title: str, keywords: List[str]) -> float:
+        """Analyze title effectiveness"""
+        score = 0.0
+        
+        # Check length (50-60 chars optimal)
+        length = len(title)
+        if 50 <= length <= 60:
+            score += 0.4
+        elif 40 <= length <= 70:
+            score += 0.2
+        
+        # Check keyword presence
+        keywords_lower = [k.lower() for k in keywords]
+        title_lower = title.lower()
+        
+        if any(k in title_lower for k in keywords_lower):
+            score += 0.3
+            # Bonus for primary keyword at start
+            if any(title_lower.startswith(k) for k in keywords_lower):
+                score += 0.2
+        
+        # Check for power words
+        power_words = self._get_power_words()
+        if any(word in title_lower for word in power_words):
+            score += 0.1
+        
+        return min(score, 1.0)
+    
+    def _analyze_keywords(self, text: str, keywords: List[str]) -> Dict:
+        """Analyze keyword usage and density"""
+        words = word_tokenize(text.lower())
+        word_count = len(words)
+        
+        # Calculate keyword density
+        density = {}
+        for keyword in keywords:
+            keyword_lower = keyword.lower()
+            count = sum(1 for i in range(len(words)) 
+                       if ' '.join(words[i:i+len(keyword.split())]) == keyword_lower)
+            density[keyword] = count / word_count * 100
+        
+        return {
+            'density': density,
+            'word_count': word_count
+        }
+    
+    def _analyze_readability(self, text: str) -> Dict:
+        """Analyze text readability"""
+        sentences = sent_tokenize(text)
+        words = word_tokenize(text)
+        
+        # Calculate metrics
+        avg_sentence_length = len(words) / len(sentences)
+        avg_word_length = sum(len(word) for word in words) / len(words)
+        
+        # Calculate Flesch Reading Ease
+        total_sentences = len(sentences)
+        total_words = len(words)
+        total_syllables = sum(self._count_syllables(word) for word in words)
+        
+        if total_sentences == 0 or total_words == 0:
+            flesch_score = 0
+        else:
+            flesch_score = 206.835 - 1.015 * (total_words / total_sentences) - 84.6 * (total_syllables / total_words)
+        
+        # Normalize scores
+        readability_score = max(min((flesch_score - 30) / 70, 1), 0)
+        
+        return {
+            'score': readability_score,
+            'flesch_score': flesch_score,
+            'avg_sentence_length': avg_sentence_length,
+            'avg_word_length': avg_word_length
+        }
+    
+    def _analyze_structure(self, text: str) -> Dict:
+        """Analyze content structure"""
+        # Analyze headings
+        headings = re.findall(r'^#+\s.*$', text, re.MULTILINE)
+        heading_levels = [len(re.match(

@@ -1,0 +1,210 @@
+# Analyze headings
+        headings = re.findall(r'^#+\s.*$', text, re.MULTILINE)
+        heading_levels = [len(re.match(r'^#+', h).group()) for h in headings]
+        
+        # Check heading hierarchy
+        hierarchy_score = 1.0
+        for i in range(1, len(heading_levels)):
+            if heading_levels[i] - heading_levels[i-1] > 1:
+                hierarchy_score -= 0.1
+        
+        # Check section lengths
+        sections = re.split(r'^#+\s.*$', text, flags=re.MULTILINE)[1:]
+        section_lengths = [len(s.strip().split()) for s in sections]
+        length_score = 1.0
+        
+        for length in section_lengths:
+            if length < 50 or length > 500:
+                length_score -= 0.1
+        
+        # Calculate overall structure score
+        structure_score = (hierarchy_score + length_score) / 2
+        
+        return {
+            'score': max(min(structure_score, 1.0), 0.0),
+            'heading_count': len(headings),
+            'section_count': len(sections),
+            'hierarchy_score': hierarchy_score,
+            'length_score': length_score
+        }
+    
+    async def _optimize_title(self, title: str, keywords: List[str]) -> str:
+        """Optimize title for SEO"""
+        prompt = f"""
+        Optimize this title for SEO while keeping it engaging:
+        {title}
+
+        Target keywords: {', '.join(keywords)}
+        Requirements:
+        - Length between 50-60 characters
+        - Include primary keyword naturally
+        - Compelling and click-worthy
+        - Clear value proposition
+
+        Return only the optimized title.
+        """
+
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an SEO expert."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content.strip()
+    
+    async def _optimize_content_body(
+        self,
+        content: str,
+        keywords: List[str],
+        analysis: SEOAnalysis
+    ) -> str:
+        """Optimize main content body"""
+        if analysis.keyword_score >= 0.8:
+            return content
+        
+        prompt = f"""
+        Optimize this content for SEO while maintaining natural flow:
+
+        Target keywords: {', '.join(keywords)}
+        Current keyword density: {analysis.keyword_density}
+
+        Requirements:
+        - Natural keyword integration
+        - Maintain readability
+        - Keep original meaning
+        - Add LSI keywords where relevant
+
+        Content:
+        {content}
+
+        Return only the optimized content.
+        """
+
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an SEO expert."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content
+    
+    async def _generate_meta_description(self, content: Dict, keywords: List[str]) -> str:
+        """Generate optimized meta description"""
+        prompt = f"""
+        Create an SEO-optimized meta description for:
+        Title: {content['title']}
+        Keywords: {', '.join(keywords)}
+
+        Requirements:
+        - 150-160 characters
+        - Include primary keyword
+        - Compelling call-to-action
+        - Clear value proposition
+
+        Return only the meta description.
+        """
+
+        response = await self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an SEO expert."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return response.choices[0].message.content.strip()
+    
+    def _needs_optimization(
+        self,
+        analysis: SEOAnalysis,
+        target_metrics: Optional[Dict] = None
+    ) -> bool:
+        """Determine if content needs optimization"""
+        if not target_metrics:
+            target_metrics = {
+                'title_score': 0.8,
+                'content_score': 0.8,
+                'keyword_score': 0.8,
+                'readability_score': 0.8,
+                'structure_score': 0.8
+            }
+        
+        return any(
+            getattr(analysis, metric) < target
+            for metric, target in target_metrics.items()
+        )
+    
+    def _generate_improvements(
+        self,
+        title_score: float,
+        keyword_score: float,
+        readability_score: float,
+        structure_score: float
+    ) -> Dict[str, List[str]]:
+        """Generate improvement suggestions"""
+        improvements = {}
+        
+        if title_score < 0.8:
+            improvements['title'] = [
+                "Make title more SEO-friendly",
+                "Include primary keyword in title",
+                "Optimize title length (50-60 characters)"
+            ]
+        
+        if keyword_score < 0.8:
+            improvements['keywords'] = [
+                "Increase keyword density naturally",
+                "Add LSI keywords",
+                "Optimize keyword placement"
+            ]
+        
+        if readability_score < 0.8:
+            improvements['readability'] = [
+                "Shorten sentences",
+                "Use simpler words",
+                "Break up long paragraphs"
+            ]
+        
+        if structure_score < 0.8:
+            improvements['structure'] = [
+                "Improve heading hierarchy",
+                "Balance section lengths",
+                "Add more subheadings"
+            ]
+        
+        return improvements
+    
+    def _count_syllables(self, word: str) -> int:
+        """Count syllables in a word"""
+        word = word.lower()
+        count = 0
+        vowels = "aeiouy"
+        previous_was_vowel = False
+        
+        for char in word:
+            is_vowel = char in vowels
+            if is_vowel and not previous_was_vowel:
+                count += 1
+            previous_was_vowel = is_vowel
+        
+        if word.endswith('e'):
+            count -= 1
+        if word.endswith('le') and len(word) > 2 and word[-3] not in vowels:
+            count += 1
+        if count == 0:
+            count = 1
+            
+        return count
+    
+    def _get_power_words(self) -> List[str]:
+        """Get list of power words for titles"""
+        return [
+            "ultimate", "complete", "essential", "proven", "guide",
+            "secrets", "powerful", "amazing", "incredible", "best",
+            "top", "how to", "quick", "easy", "simple",
+            "free", "new", "discover", "unlock", "revealed"
+        ]
