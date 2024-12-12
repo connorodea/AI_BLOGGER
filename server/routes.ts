@@ -3,13 +3,21 @@ import { createServer, type Server } from "http";
 import { db } from "../db";
 import { posts, analytics, distributions } from "../db/schema";
 import { desc, eq, sql } from "drizzle-orm";
-import contentRoutes from "./routes/content";
+import { contentRouter } from "./routes/content";
+import fetch from 'node-fetch';
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
-  // Register routes with error handling
-  app.use("/api/content", (req, res, next) => {
-    contentRoutes(req, res, next).catch(next);
+  
+  // Register API routes
+  app.use("/api", contentRouter);
+  
+  // Health check endpoint
+  app.get("/health", (req, res) => {
+    res.json({ 
+      status: "healthy",
+      timestamp: new Date().toISOString()
+    });
   });
 
   // Dashboard stats with error handling

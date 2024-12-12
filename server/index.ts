@@ -4,7 +4,10 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from 'express-rate-limit';
 import { registerRoutes } from "./routes";
-import { contentGenerator } from "./services/content-generator";
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 // Initialize express app
 const app = express();

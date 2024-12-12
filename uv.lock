@@ -169,6 +169,12 @@ wheels = [
 ]
 
 [[package]]
+name = "django-routers"
+version = "0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/32/fe/4c23c1f4ed881460512e81963d3433b7b525793136193ca37d3af4de035a/django-routers-0.2.tar.gz", hash = "sha256:eeb176cbb46a83454d96a5239e1bb1334914f7f5f595f4692f2684a0ee128fe6", size = 2185 }
+
+[[package]]
 name = "fastapi"
 version = "0.115.6"
 source = { registry = "https://pypi.org/simple" }
@@ -841,6 +847,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "backoff" },
+    { name = "django-routers" },
     { name = "fastapi" },
     { name = "nltk" },
     { name = "numpy" },
@@ -863,6 +870,7 @@ dependencies = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.11.10" },
     { name = "backoff", specifier = ">=2.2.1" },
+    { name = "django-routers", specifier = ">=0.2" },
     { name = "fastapi", specifier = ">=0.115.6" },
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "numpy", specifier = ">=2.2.0" },

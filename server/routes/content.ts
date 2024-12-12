@@ -2,22 +2,23 @@ import express from 'express';
 import { z } from 'zod';
 import { db } from '../../db';
 import { posts } from '../../db/schema';
-import { contentGenerator } from '../services/content-generator';
 import { eq } from 'drizzle-orm';
+import { contentGenerator } from '../services/content-generator';
+import { seoOptimizer } from '../services/content-management/SEOOptimizer';
 
-const router = express.Router();
+export const contentRouter = express.Router();
 
 // Schema for content generation request
 const generateContentSchema = z.object({
   topic: z.string().min(1, "Topic is required"),
   keywords: z.array(z.string()).min(1, "At least one keyword is required"),
-  contentType: z.enum(['blog_post']).default('blog_post'),
+  contentType: z.enum(['blog_post', 'article', 'social_post']).default('blog_post'),
   tone: z.enum(['professional', 'casual', 'technical']).default('professional'),
   length: z.enum(['short', 'medium', 'long']).default('medium'),
 });
 
 // Generate content endpoint
-router.post('/generate', async (req, res) => {
+contentRouter.post('/generate', async (req, res) => {
   try {
     const validatedData = generateContentSchema.parse(req.body);
     
@@ -38,41 +39,32 @@ router.post('/generate', async (req, res) => {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
 
-    // Save to database with proper error handling
-    try {
-      const [post] = await db.insert(posts).values({
-        title: validatedData.topic,
-        content: contentResult.content,
-        slug,
-        keywords: validatedData.keywords,
-        category: validatedData.contentType,
-        status: 'draft',
-        metadata: {
-          generationDetails: {
-            model: contentResult.model,
-            tone: validatedData.tone,
-            length: validatedData.length,
-            tokenUsage: contentResult.usage
-          }
-        }
-      }).returning();
-
-      // Return success response with generated content
-      res.json({
-        success: true,
-        post,
+    // Save to database
+    const [post] = await db.insert(posts).values({
+      title: validatedData.topic,
+      content: contentResult.content,
+      slug,
+      keywords: validatedData.keywords,
+      category: validatedData.contentType,
+      status: 'draft',
+      metadata: {
         generationDetails: {
-          tokenUsage: contentResult.usage,
-          model: contentResult.model
+          model: contentResult.model,
+          tone: validatedData.tone,
+          length: validatedData.length,
+          tokenUsage: contentResult.usage
         }
-      });
-    } catch (dbError) {
-      console.error('Database operation failed:', dbError);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to save content to database'
-      });
-    }
+      }
+    }).returning();
+
+    res.json({
+      success: true,
+      post,
+      generationDetails: {
+        tokenUsage: contentResult.usage,
+        model: contentResult.model
+      }
+    });
   } catch (error) {
     console.error('Content generation error:', error);
     if (error instanceof z.ZodError) {
@@ -90,8 +82,8 @@ router.post('/generate', async (req, res) => {
   }
 });
 
-// Get generated content
-router.get('/:id', async (req, res) => {
+// Get post by ID
+contentRouter.get('/:id', async (req, res) => {
   try {
     const post = await db.query.posts.findFirst({
       where: eq(posts.id, parseInt(req.params.id))
@@ -117,4 +109,47 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-export default router;
+// Optimize content
+contentRouter.post('/:id/optimize', async (req, res) => {
+  try {
+    const post = await db.query.posts.findFirst({
+      where: eq(posts.id, parseInt(req.params.id))
+    });
+
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        error: 'Post not found'
+      });
+    }
+
+    const optimizationResult = await seoOptimizer.optimizeContent(
+      post.content,
+      post.keywords
+    );
+
+    // Update post with optimized content
+    const [updatedPost] = await db.update(posts)
+      .set({
+        content: optimizationResult.content,
+        metadata: {
+          ...post.metadata,
+          seo: optimizationResult
+        }
+      })
+      .where(eq(posts.id, post.id))
+      .returning();
+
+    res.json({
+      success: true,
+      post: updatedPost,
+      seoAnalysis: optimizationResult
+    });
+  } catch (error) {
+    console.error('Content optimization error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred'
+    });
+  }
+});
