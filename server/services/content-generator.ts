@@ -27,8 +27,8 @@ class ContentGenerationError extends Error {
 
 class AIContentGenerator {
   private client: OpenAI;
-  private defaultModel: string;
-  private defaultTemperature: number;
+  private model: string;
+  private temperature: number;
 
   constructor() {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -37,8 +37,8 @@ class AIContentGenerator {
     }
 
     this.client = new OpenAI({ apiKey });
-    this.defaultModel = 'gpt-4';
-    this.defaultTemperature = 0.7;
+    this.model = 'gpt-4';
+    this.temperature = 0.7;
   }
 
   async generateContent(
@@ -56,7 +56,7 @@ class AIContentGenerator {
       );
 
       const response = await this.client.chat.completions.create({
-        model: this.defaultModel,
+        model: this.model,
         messages: [
           {
             role: "system",
@@ -67,7 +67,7 @@ class AIContentGenerator {
             content: prompt
           }
         ],
-        temperature: this.defaultTemperature,
+        temperature: this.temperature,
         max_tokens: this.getMaxTokens(config.length || 'medium')
       });
 
@@ -83,7 +83,7 @@ class AIContentGenerator {
           prompt_tokens: response.usage?.prompt_tokens || 0,
           completion_tokens: response.usage?.completion_tokens || 0
         },
-        model: this.defaultModel
+        model: this.model
       };
     } catch (error) {
       console.error('Content generation failed:', error);

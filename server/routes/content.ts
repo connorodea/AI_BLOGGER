@@ -128,13 +128,24 @@ contentRouter.post('/:id/optimize', async (req, res) => {
       post.keywords
     );
 
-    // Update post with optimized content
+    // Update post with optimized content and SEO analysis
     const [updatedPost] = await db.update(posts)
       .set({
         content: optimizationResult.content,
         metadata: {
           ...post.metadata,
-          seo: optimizationResult
+          seo: {
+            scores: {
+              titleScore: optimizationResult.titleScore,
+              contentScore: optimizationResult.contentScore,
+              keywordScore: optimizationResult.keywordScore,
+              readabilityScore: optimizationResult.readabilityScore,
+              structureScore: optimizationResult.structureScore
+            },
+            suggestions: optimizationResult.optimizationSuggestions,
+            keywordDensity: optimizationResult.keywordDensity,
+            readabilityMetrics: optimizationResult.readabilityMetrics
+          }
         }
       })
       .where(eq(posts.id, post.id))

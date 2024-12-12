@@ -1,9 +1,32 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
-import { seoOptimizer } from './SEOOptimizer';
+
+// Define schemas for validation
+const readabilityMetricsSchema = z.object({
+  fleschScore: z.number(),
+  avgSentenceLength: z.number(),
+  avgWordLength: z.number()
+});
+
+const seoAnalysisSchema = z.object({
+  titleScore: z.number(),
+  contentScore: z.number(),
+  keywordScore: z.number(),
+  readabilityScore: z.number(),
+  structureScore: z.number(),
+  optimizationSuggestions: z.array(z.string()),
+  keywordDensity: z.record(z.string(), z.number()),
+  readabilityMetrics: readabilityMetricsSchema,
+  improvements: z.record(z.string(), z.array(z.string()))
+});
+
+// TypeScript types based on Zod schemas
+type ReadabilityMetrics = z.infer<typeof readabilityMetricsSchema>;
+type SEOAnalysis = z.infer<typeof seoAnalysisSchema>;
 
 interface OptimizationResult {
-  optimizedContent: string;
+  content: string;
+  seoAnalysis: SEOAnalysis;
   metrics: {
     readability: number;
     engagement: number;
@@ -11,7 +34,6 @@ interface OptimizationResult {
     accuracy: number;
     coherence: number;
   };
-  seoAnalysis?: any;
 }
 
 export class ContentOptimizer {
@@ -27,10 +49,7 @@ export class ContentOptimizer {
     this.client = new OpenAI({ 
       apiKey,
       timeout: 60000,
-      maxRetries: 5,
-      defaultHeaders: {
-        'OpenAI-Beta': 'assistants=v1'
-      }
+      maxRetries: 5
     });
   }
 
@@ -52,104 +71,157 @@ export class ContentOptimizer {
     keywords: string[]
   ): Promise<OptimizationResult> {
     try {
-      // Check content quality
+      // Initial analysis
       const [metrics, seoAnalysis] = await Promise.all([
-        this.checkQuality(content),
-        seoOptimizer.optimizeContent(content, keywords)
+        this.analyzeContent(content),
+        this.analyzeSEO(content, keywords)
       ]);
-      
+
       // Improve content if needed
       let optimizedContent = content;
-      const needsImprovement = Object.values(metrics).some(score => score < 0.8);
-      
+      const needsImprovement = this.needsOptimization(seoAnalysis) || 
+                             Object.values(metrics).some(score => score < 0.8);
+
       if (needsImprovement) {
-        const issues = Object.entries(metrics)
-          .filter(([_, score]) => score < 0.8)
-          .map(([key]) => key);
-          
-        // Improve content with enhanced quality checks
-        optimizedContent = await this.improveContent(content, issues, keywords, seoAnalysis);
+        optimizedContent = await this.improveContent(content, keywords, seoAnalysis);
         
-        // Recheck quality after improvements
+        // Re-analyze after improvements
         const [updatedMetrics, updatedSeoAnalysis] = await Promise.all([
-          this.checkQuality(optimizedContent),
-          seoOptimizer.optimizeContent(optimizedContent, keywords)
+          this.analyzeContent(optimizedContent),
+          this.analyzeSEO(optimizedContent, keywords)
         ]);
 
         return {
-          optimizedContent,
-          metrics: updatedMetrics,
-          seoAnalysis: updatedSeoAnalysis
+          content: optimizedContent,
+          seoAnalysis: updatedSeoAnalysis,
+          metrics: updatedMetrics
         };
       }
 
       return {
-        optimizedContent,
-        metrics,
-        seoAnalysis
+        content,
+        seoAnalysis,
+        metrics
       };
     } catch (error) {
       console.error('Content optimization failed:', error);
-      throw new Error(`Failed to optimize content: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(
+        `Content optimization failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
     }
   }
 
-  private async checkQuality(content: string): Promise<OptimizationResult['metrics']> {
-    const prompt = `
-      Analyze this content against these criteria.
-      Rate each from 0-1.
-      Return only JSON with scores.
+  private needsOptimization(analysis: SEOAnalysis, minScore: number = 0.8): boolean {
+    return (
+      analysis.titleScore < minScore ||
+      analysis.contentScore < minScore ||
+      analysis.keywordScore < minScore ||
+      analysis.readabilityScore < minScore ||
+      analysis.structureScore < minScore
+    );
+  }
 
-      Criteria: readability, engagement, seo, accuracy, coherence
+  private async analyzeContent(content: string): Promise<OptimizationResult['metrics']> {
+    return this.retryOperation(async () => {
+      const prompt = `
+        Analyze this content for quality metrics.
+        Rate each metric from 0-1:
+        - readability: ease of understanding
+        - engagement: how compelling the content is
+        - seo: search engine optimization
+        - accuracy: factual correctness
+        - coherence: logical flow and structure
 
-      Content:
-      ${content.substring(0, 1000)}... (truncated)
-    `;
+        Content:
+        ${content.substring(0, 1000)}... (truncated)
 
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: [
-        { role: "system", content: "You are a content quality expert." },
-        { role: "user", content: prompt }
-      ],
-      response_format: { type: "json_object" }
+        Return only JSON with scores.
+      `;
+
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: "system", content: "You are a content quality expert." },
+          { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" }
+      });
+
+      return JSON.parse(response.choices[0].message.content || '{}');
     });
+  }
 
-    return JSON.parse(response.choices[0].message.content || '{}');
+  private async analyzeSEO(content: string, keywords: string[]): Promise<SEOAnalysis> {
+    return this.retryOperation(async () => {
+      const prompt = `
+        Analyze this content for SEO optimization. Focus on:
+        - Title effectiveness
+        - Keyword usage and placement
+        - Content structure and headings
+        - Readability metrics
+        - Meta description potential
+
+        Keywords to analyze: ${keywords.join(', ')}
+
+        Content:
+        ${content.substring(0, 1000)}... (truncated)
+
+        Return a JSON object following the SEOAnalysis schema.
+      `;
+
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: "system", content: "You are an SEO expert." },
+          { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" }
+      });
+
+      return seoAnalysisSchema.parse(JSON.parse(response.choices[0].message.content || '{}'));
+    });
   }
 
   private async improveContent(
     content: string, 
-    issues: string[],
     keywords: string[],
-    seoAnalysis: any
+    seoAnalysis: SEOAnalysis
   ): Promise<string> {
-    const prompt = `
-      Improve this content focusing on: ${issues.join(', ')}
-      
-      SEO Analysis:
-      ${JSON.stringify(seoAnalysis, null, 2)}
-      
-      Requirements:
-      - Address SEO improvements suggested in the analysis
-      - Maintain the same structure and key points
-      - Naturally incorporate these keywords: ${keywords.join(', ')}
-      - Keep the tone consistent
-      - Return in markdown format
-      
-      Content:
-      ${content}
-    `;
+    return this.retryOperation(async () => {
+      const prompt = `
+        Improve this content based on SEO analysis and quality metrics.
+        
+        SEO Analysis:
+        ${JSON.stringify(seoAnalysis, null, 2)}
+        
+        Requirements:
+        1. Maintain core message and expertise level
+        2. Optimize keyword placement: ${keywords.join(', ')}
+        3. Enhance readability and engagement
+        4. Improve structure and formatting
+        5. Add engaging transitions
+        6. Optimize headings hierarchy
+        7. Improve sentence variety
+        
+        Original Content:
+        ${content}
+        
+        Return the improved content in markdown format.
+      `;
 
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: [
-        { role: "system", content: "You are a content improvement expert." },
-        { role: "user", content: prompt }
-      ]
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          { 
+            role: "system", 
+            content: "You are a content optimization expert specializing in SEO and readability improvements." 
+          },
+          { role: "user", content: prompt }
+        ]
+      });
+
+      return response.choices[0].message.content || content;
     });
-
-    return response.choices[0].message.content || content;
   }
 }
 

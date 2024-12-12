@@ -4,16 +4,15 @@ import { db } from "../db";
 import { posts, analytics, distributions } from "../db/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { contentRouter } from "./routes/content";
-import fetch from 'node-fetch';
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
   
-  // Register API routes
-  app.use("/api", contentRouter);
+  // Register content API routes
+  app.use("/api/content", contentRouter);
   
   // Health check endpoint
-  app.get("/health", (req, res) => {
+  app.get("/api/health", (req, res) => {
     res.json({ 
       status: "healthy",
       timestamp: new Date().toISOString()
