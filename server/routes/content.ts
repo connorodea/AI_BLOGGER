@@ -35,18 +35,18 @@ contentRouter.post('/generate', async (req, res) => {
       }
     );
 
-    // Create slug from topic
-    const slug = validatedData.topic
+    // Create slug from topic title
+    const slug = validatedData.topic.title
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
 
     // Save to database
     const [post] = await db.insert(posts).values({
-      title: validatedData.topic,
+      title: validatedData.topic.title,
       content: contentResult.content,
       slug,
-      keywords: validatedData.keywords,
+      keywords: validatedData.topic.keywords,
       category: validatedData.contentType,
       status: 'draft',
       metadata: {

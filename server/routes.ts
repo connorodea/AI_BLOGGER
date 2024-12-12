@@ -4,12 +4,32 @@ import { db } from "../db";
 import { posts, analytics, distributions } from "../db/schema";
 import { desc, eq, sql } from "drizzle-orm";
 import { contentRouter } from "./routes/content";
+import OpenAI from "openai";
+import { contentGenerator } from "./services/content-generator";
+import { contentOptimizer } from "./services/content-management/ContentOptimizer";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  timeout: 30000,
+  maxRetries: 3
+});
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
   
-  // Register content API routes
+  // Register content generation API routes
   app.use("/api/content", contentRouter);
+
+  // Error handler for content routes
+  app.use("/api/content", (err: Error, req: any, res: any, next: any) => {
+    console.error("Content API error:", err);
+    res.status(500).json({
+      success: false,
+      error: process.env.NODE_ENV === "production" 
+        ? "Internal server error"
+        : err.message
+    });
+  });
   
   // Health check endpoint
   app.get("/api/health", (req, res) => {
@@ -75,39 +95,106 @@ export function registerRoutes(app: Express): Server {
 
   // Topic research
   app.get("/api/topics", async (req, res) => {
-    const { niche } = req.query;
-    const topics = await analyzeTopics(niche as string);
-    res.json(topics);
+    try {
+      const { niche } = req.query;
+      if (!niche || typeof niche !== 'string') {
+        return res.status(400).json({ 
+          success: false, 
+          error: "Niche parameter is required" 
+        });
+      }
+
+      const prompt = `
+        Suggest 5 engaging blog post topics for the niche: ${niche}
+        Include for each topic:
+        - Title
+        - Target keywords (3-5)
+        - Brief outline
+        Return as JSON array.
+      `;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4",
+        messages: [
+          { role: "system", content: "You are a content strategy expert." },
+          { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" }
+      });
+
+      const topics = JSON.parse(completion.choices[0].message.content || '[]');
+      res.json({ success: true, topics });
+    } catch (error) {
+      console.error("Topic research error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Failed to research topics" 
+      });
+    }
   });
 
   // Generate content
   app.post("/api/generate/content", async (req, res) => {
-    const { topic } = req.body;
-    const content = await generateContent(topic);
-    res.json({ content });
-  });
-
-  // SEO analysis
-  app.post("/api/seo/analyze", async (req, res) => {
     try {
-      const { content, keywords } = req.body;
-      const result = await optimizeForSEO(content, keywords);
-      res.json(result);
+      const { topic } = req.body;
+      if (!topic) {
+        return res.status(400).json({
+          success: false,
+          error: "Topic is required"
+        });
+      }
+
+      const result = await contentGenerator.generateContent(
+        topic.title,
+        topic.keywords,
+        {
+          contentType: 'blog_post',
+          tone: 'professional',
+          length: 'medium'
+        }
+      );
+
+      res.json({ 
+        success: true, 
+        content: result.content,
+        metadata: {
+          model: result.model,
+          usage: result.usage
+        }
+      });
     } catch (error) {
-      console.error("Error analyzing SEO:", error);
-      res.status(500).json({ message: "Failed to analyze SEO" });
+      console.error("Content generation error:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to generate content"
+      });
     }
   });
 
-  // SEO optimization
+  // SEO analysis and optimization
   app.post("/api/seo/optimize", async (req, res) => {
     try {
       const { content, keywords } = req.body;
-      const result = await optimizeForSEO(content, keywords);
-      res.json({ optimizedContent: result.optimizedContent });
+      if (!content || !keywords) {
+        return res.status(400).json({
+          success: false,
+          error: "Content and keywords are required"
+        });
+      }
+
+      const result = await contentOptimizer.optimizeContent(content, keywords);
+      res.json({
+        success: true,
+        content: result.content,
+        seoAnalysis: result.seoAnalysis,
+        metrics: result.metrics
+      });
     } catch (error) {
-      console.error("Error optimizing content:", error);
-      res.status(500).json({ message: "Failed to optimize content" });
+      console.error("SEO optimization error:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to optimize content"
+      });
     }
   });
 

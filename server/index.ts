@@ -16,11 +16,22 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' ? process.env.CORS_ORIGIN : '*',
+  origin: process.env.NODE_ENV === 'production' ? process.env.CORS_ORIGIN : 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 }));
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// Add content-type middleware
+app.use((req, res, next) => {
+  if (req.method === 'POST' || req.method === 'PUT') {
+    res.setHeader('Content-Type', 'application/json');
+  }
+  next();
+});
 
 // Rate limiting
 const limiter = rateLimit({
@@ -66,10 +77,18 @@ app.get('/health', (req: Request, res: Response) => {
 // Register API routes
 const server = registerRoutes(app);
 
-// Global error handler
+// Global error handler with error logging
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  console.error('Server error:', err);
+  console.error('Server error:', {
+    error: err,
+    stack: err.stack,
+    path: req.path,
+    method: req.method
+  });
+  
+  // Send appropriate error response
   res.status(500).json({
+    success: false,
     error: process.env.NODE_ENV === 'production' 
       ? 'Internal server error'
       : err.message
@@ -78,7 +97,7 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 
 // Start server
 const PORT = Number(process.env.PORT) || 5000;
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
 
