@@ -4,14 +4,16 @@ import { db } from '../../db';
 import { posts } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { contentGenerator } from '../services/content-generator';
-import { seoOptimizer } from '../services/content-management/SEOOptimizer';
+import { contentOptimizer } from '../services/content-management/ContentOptimizer';
 
 export const contentRouter = express.Router();
 
 // Schema for content generation request
 const generateContentSchema = z.object({
-  topic: z.string().min(1, "Topic is required"),
-  keywords: z.array(z.string()).min(1, "At least one keyword is required"),
+  topic: z.object({
+    title: z.string().min(1, "Topic title is required"),
+    keywords: z.array(z.string()).min(1, "At least one keyword is required"),
+  }),
   contentType: z.enum(['blog_post', 'article', 'social_post']).default('blog_post'),
   tone: z.enum(['professional', 'casual', 'technical']).default('professional'),
   length: z.enum(['short', 'medium', 'long']).default('medium'),
@@ -24,8 +26,8 @@ contentRouter.post('/generate', async (req, res) => {
     
     // Generate blog content
     const contentResult = await contentGenerator.generateContent(
-      validatedData.topic,
-      validatedData.keywords,
+      validatedData.topic.title,
+      validatedData.topic.keywords,
       {
         contentType: validatedData.contentType,
         tone: validatedData.tone,
@@ -123,7 +125,7 @@ contentRouter.post('/:id/optimize', async (req, res) => {
       });
     }
 
-    const optimizationResult = await seoOptimizer.optimizeContent(
+    const optimizationResult = await contentOptimizer.optimizeContent(
       post.content,
       post.keywords
     );
@@ -134,18 +136,7 @@ contentRouter.post('/:id/optimize', async (req, res) => {
         content: optimizationResult.content,
         metadata: {
           ...post.metadata,
-          seo: {
-            scores: {
-              titleScore: optimizationResult.titleScore,
-              contentScore: optimizationResult.contentScore,
-              keywordScore: optimizationResult.keywordScore,
-              readabilityScore: optimizationResult.readabilityScore,
-              structureScore: optimizationResult.structureScore
-            },
-            suggestions: optimizationResult.optimizationSuggestions,
-            keywordDensity: optimizationResult.keywordDensity,
-            readabilityMetrics: optimizationResult.readabilityMetrics
-          }
+          seo: optimizationResult.seoAnalysis
         }
       })
       .where(eq(posts.id, post.id))
